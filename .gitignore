@@ -1,0 +1,4 @@
+yolov9c.pt
+build/
+pose_estimation.egg-info/
+*__pycache__*
