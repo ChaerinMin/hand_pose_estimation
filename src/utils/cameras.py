@@ -27,13 +27,20 @@ BOTTOM_CAMERAS = [ # camera at the bottom
                   "brics-odroid-030_cam1",
                 ]
 
+# Note: For text data only. Since partial camera is not functional well.
+IGNORE_CAMERAS = [
+    "brics-odroid-009_cam1",
+    "brics-odroid-010_cam1",
+    "brics-odroid-024_cam1",
+    "brics-odroid-025_cam1",
+]
 def removed_cameras(remove_side=False, remove_bottom=False):
     to_remove = []
     if remove_side:
         to_remove = to_remove + SIDE_CAMERAS 
     if remove_bottom:
         to_remove = to_remove + BOTTOM_CAMERAS 
-    return to_remove
+    return to_remove + IGNORE_CAMERAS
 
 def map_camera_names(base_dir, name_list):
     """

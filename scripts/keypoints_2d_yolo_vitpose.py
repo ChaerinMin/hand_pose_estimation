@@ -110,8 +110,13 @@ def main():
     cpm = ViTPoseModel(device)
     model = YOLO(args.yolo_model)
     
-    input_path = os.path.join(args.root_dir, args.seq_path)    
-    selected_vid_idxs = [args.ith]
+    input_path = os.path.join(args.root_dir, args.seq_path)
+    if args.ith == -1:
+        folder0 = os.listdir(input_path)[0]
+        folder0_path = os.path.join(input_path, folder0)
+        selected_vid_idxs = list(range(len(os.listdir(folder0_path))//2))
+    else:    
+        selected_vid_idxs = [args.ith]
     
     for selected_vid_idx in selected_vid_idxs:
         

@@ -63,6 +63,7 @@ else:
     params_txt = "params.txt"
 
 base_path = os.path.join(args.root_dir)
+image_dir = os.path.join(base_path, args.seq_path)
 output_path = args.out_dir
 params_path = os.path.join(output_path, params_txt)
 
@@ -73,170 +74,183 @@ for cam in cams_to_remove:
     if cam in cam_names:
         cam_names.remove(cam)
 
-keypoints2d_dir_right = os.path.join(output_path, "keypoints_2d", "right", str(args.ith).zfill(3))
-keypoints2d_dir_left = os.path.join(output_path, "keypoints_2d", "left",  str(args.ith).zfill(3))
-bboxes_dir_right = os.path.join(output_path, "bboxes", "right",  str(args.ith).zfill(3))
-bboxes_dir_left = os.path.join(output_path, "bboxes", "left",  str(args.ith).zfill(3))
-keypoints3d_dir = os.path.join(output_path, "keypoints_3d", str(args.ith).zfill(3))
-keypt3d_file_left = os.path.join(keypoints3d_dir, "left.jsonl")
-keypt3d_file_right = os.path.join(keypoints3d_dir, "right.jsonl")
 
-cam_mapper = map_camera_names(keypoints2d_dir_right, cam_names)
-intrs, projs, dist_intrs, dists, cameras = get_projections(args, params, cam_names, cam_mapper)
+if args.ith == -1:
+    folder0 = os.listdir(image_dir)[0]
+    folder0_path = os.path.join(image_dir, folder0)
+    selected_vid_idxs = list(range(len(os.listdir(folder0_path))//2))
+else:    
+    selected_vid_idxs = [args.ith]
 
+for selected_vid_idx in selected_vid_idxs:
+    
+    keypoints2d_dir_right = os.path.join(output_path, "keypoints_2d", "right", str(selected_vid_idx).zfill(3))
+    keypoints2d_dir_left = os.path.join(output_path, "keypoints_2d", "left",  str(selected_vid_idx).zfill(3))
+    bboxes_dir_right = os.path.join(output_path, "bboxes", "right",  str(selected_vid_idx).zfill(3))
+    bboxes_dir_left = os.path.join(output_path, "bboxes", "left",  str(selected_vid_idx).zfill(3))
+    keypoints3d_dir = os.path.join(output_path, "keypoints_3d", str(selected_vid_idx).zfill(3))
+    keypt3d_file_left = os.path.join(keypoints3d_dir, "left.jsonl")
+    keypt3d_file_right = os.path.join(keypoints3d_dir, "right.jsonl")
 
-# loads the selected frames
-if args.use_filtered:
-    chosen_path_left = os.path.join(keypoints3d_dir, f"chosen_frames_left.json")
-    chosen_path_right = os.path.join(keypoints3d_dir, f"chosen_frames_right.json")
-    with open(chosen_path_right, "r") as f:
-        chosen_frames_right = set(json.load(f))
-    with open(chosen_path_left, "r") as f:
-        chosen_frames_left = set(json.load(f))
-    chosen_frames =list(set(chosen_frames_right | chosen_frames_left))
-else:
-    chosen_frames = range(args.start, args.end, args.stride)
-
-chosen_frames = sorted(chosen_frames)
+    cam_mapper = map_camera_names(keypoints2d_dir_right, cam_names)
+    intrs, projs, dist_intrs, dists, cameras = get_projections(args, params, cam_names, cam_mapper)
 
 
+    # loads the selected frames
+    if args.use_filtered:
+        chosen_path_left = os.path.join(keypoints3d_dir, f"chosen_frames_left.json")
+        chosen_path_right = os.path.join(keypoints3d_dir, f"chosen_frames_right.json")
+        with open(chosen_path_right, "r") as f:
+            chosen_frames_right = set(json.load(f))
+        with open(chosen_path_left, "r") as f:
+            chosen_frames_left = set(json.load(f))
+        chosen_frames =list(set(chosen_frames_right | chosen_frames_left))
+    else:
+        chosen_frames = range(args.start, args.end, args.stride)
 
-# loads 2d & 3d keypoints
-all_keypoints2d_left, all_keypoints2d_right = [], []
-all_bboxes_left, all_bboxes_right = [], []
-for cam in tqdm(cam_names, total=len(cam_names)):
-    if cam in cam_mapper:
-        keypoints2d_left = []
-        keypoints2d_right = []
-        bboxes_left = []
-        bboxes_right = []
-        ap_keypoints_path_left = os.path.join(keypoints2d_dir_left, f"{cam_mapper[cam]}.jsonl")
-        ap_keypoints_path_right = os.path.join(keypoints2d_dir_right, f"{cam_mapper[cam]}.jsonl")
-        bboxes_path_left = os.path.join(bboxes_dir_right, f"{cam_mapper[cam]}.jsonl")
-        bboxes_path_right = os.path.join(bboxes_dir_left, f"{cam_mapper[cam]}.jsonl")
-        with open(ap_keypoints_path_left, "r") as fl, open(ap_keypoints_path_right, "r") as fr, open(bboxes_path_left, "r") as fbl, open(bboxes_path_right, "r") as fbr:
-            for l_idx, (linel, liner, linebl, linebr) in enumerate(zip(fl, fr, fbl, fbr)):
-                if l_idx in chosen_frames:
-                    keypoints2d_left.append(np.array(ujson.loads(linel)).reshape(-1, 3))
-                    keypoints2d_right.append(np.array(ujson.loads(liner)).reshape(-1, 3))
-                    bboxes_left.append(np.array(ujson.loads(linebl) + [1.0]))
-                    bboxes_right.append(np.array(ujson.loads(linebr) + [1.0]))
-        all_keypoints2d_left.append(np.asarray(keypoints2d_left))
-        all_keypoints2d_right.append(np.asarray(keypoints2d_right))
-        all_bboxes_left.append(np.asarray(bboxes_left))
-        all_bboxes_right.append(np.asarray(bboxes_right))
-        
-all_keypoints2d_left = np.asarray(all_keypoints2d_left)
-all_keypoints2d_right = np.asarray(all_keypoints2d_right)
-all_bboxes_left = np.asarray(all_bboxes_left)
-all_bboxes_right = np.asarray(all_bboxes_right)
-all_keypoints2d_left = np.swapaxes(all_keypoints2d_left, 0, 1)
-all_keypoints2d_right = np.swapaxes(all_keypoints2d_right, 0, 1)
-all_bboxes_left = np.swapaxes(all_bboxes_left, 0, 1)
-all_bboxes_right = np.swapaxes(all_bboxes_right, 0, 1)
-
-keypoints3d_right, keypoints3d_left = [], []
-with open(keypt3d_file_left, "r") as fl, open(keypt3d_file_right, "r") as fr:
-    for l_idx, (linel, liner) in enumerate(zip(fl, fr)):
-        if l_idx in chosen_frames:
-            keypoints3d_left.append(np.array(ujson.loads(linel)).reshape(-1, 4))
-            keypoints3d_right.append(np.array(ujson.loads(liner)).reshape(-1, 4))
-keypoints3d_left = np.asarray(keypoints3d_left)
-keypoints3d_right = np.asarray(keypoints3d_right)
-
-# loads the mano model
-with Timer('Loading {}, {}'.format(args.model, args.gender), not False):
-    body_model_right = load_model(gender=args.gender, model_type=args.model, model_path="data/smplx", num_pca_comps=6, use_pca=True, use_flat_mean=True)
-
-with Timer('Loading {}, {}'.format(args.model, args.gender), not False):
-    body_model_left = load_model(gender=args.gender, model_type=args.model.replace('r', 'l'), model_path="data/smplx", num_pca_comps=6, use_pca=True, use_flat_mean=True)
-
-# fits the mano model
-dataset_config = CONFIG[args.body]
-
-params_right = smpl_from_keypoints3d2d(body_model_right, keypoints3d_right, all_keypoints2d_right, all_bboxes_right, projs, 
-    config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
-# params_right = smpl_from_keypoints3d(body_model, keypoints3d_right, 
-#     config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
-
-params_left = smpl_from_keypoints3d2d(body_model_left, keypoints3d_left, all_keypoints2d_left, all_bboxes_left, projs, 
-    config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
-# params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left, 
-#     config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
+    chosen_frames = sorted(chosen_frames)
 
 
-# visualize model
-if args.vis_smpl or args.save_mesh or args.vis_2d_repro or args.vis_3d_repro:
-    import trimesh
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    if args.vis_smpl:
-        outhand_mano = f'{output_path}/mano/{str(args.ith).zfill(3)}'
-        os.makedirs(outhand_mano, exist_ok=True)
-        if not args.save_frame:
-            outhand_mano = cv2.VideoWriter(f'{output_path}/mano/{str(args.ith).zfill(3)}.mp4', fourcc, 30.0, (2133, 1000)) if args.vis_smpl else None
-    if args.vis_2d_repro:
-        outhand_2d = f'{output_path}/repro_2d/{str(args.ith).zfill(3)}'
-        os.makedirs(outhand_2d, exist_ok=True)
-        if not args.save_frame:
-            outhand_2d = cv2.VideoWriter(f'{output_path}/repro_2d/{str(args.ith).zfill(3)}.mp4', fourcc, 30.0, (2133, 1000)) if args.vis_smpl else None
-    if args.vis_3d_repro:
-        outhand_3d = f'{output_path}/repro_3d/{str(args.ith).zfill(3)}'
-        os.makedirs(outhand_3d, exist_ok=True)
-        if not args.save_frame:
-            outhand_3d = cv2.VideoWriter(f'{output_path}/repro_3d/{str(args.ith).zfill(3)}.mp4', fourcc, 30.0, (2133, 1000)) if args.vis_smpl else None
-
-    nf = 0
-    image_dir = os.path.join(base_path, args.seq_path)
-    reader = Reader("video", image_dir, ith=args.ith)
-    for abs_idx, (frames, idx) in tqdm(enumerate(reader(chosen_frames)), total=len(chosen_frames)):
-        images = []
-        c_idx = 0
-        for cam in cam_names:
-            if cam in cam_mapper:
-                image = frames[cam_mapper[cam]]
-                if args.undistort:
-                    image = param_utils.undistort_image(intrs[c_idx], dist_intrs[c_idx], dists[c_idx], image)
-                    c_idx += 1
-                images.append(image)
-        
-        param_right = select_nf(params_right, nf)
-        param_left = select_nf(params_left, nf)
-        # visualizing the model
-        if args.vis_smpl:
-            vertices_right = body_model_right(return_verts=True, return_tensor=False, **param_right)
-            vertices_left = body_model_left(return_verts=True, return_tensor=False, **param_left)
-            vertices = np.concatenate((vertices_right[0], vertices_left[0]), axis=0)
-            faces = np.concatenate((body_model_right.faces, vertices_right[0].shape[0]+body_model_left.faces), axis=0)
-            vis_smpl(args, vertices=vertices, faces=faces, images=images, nf=nf, cameras=cameras, add_back=True, out_dir=outhand_mano)
-
-        # visualize keypoint reprojection
-        vis_config = CONFIG['handlr']
-        if args.vis_2d_repro:
-            keypoints2d = np.concatenate((all_keypoints2d_right[abs_idx], all_keypoints2d_left[abs_idx]), axis=1)
-            kpts_repro = keypoints2d
-            vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_2d)
-        
-        if args.vis_3d_repro:
-        #     keypoints = body_model(return_verts=False, return_tensor=False, **param)[0]
-            keypoints = np.concatenate((keypoints3d_right[abs_idx], keypoints3d_left[abs_idx]), axis=0)
-            kpts_repro = projectN3(keypoints, projs)
-            kpts_repro[:, :, 2] = 0.5
-            vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_3d)
-
-        # save the mesh
-        if args.save_mesh:
-            vertices = np.concatenate((vertices_right[0], vertices_left[0]), axis=0)
-            faces = np.concatenate((body_model_right.faces, np.amax(body_model_right.faces)+body_model_left.faces), axis=0)
-            mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-            outdir = os.path.join(output_path, f'meshes/{str(args.ith).zfill(3)}')
-            os.makedirs(outdir, exist_ok=True)
-            outname = os.path.join(outdir, '{:08d}.obj'.format(nf))
-            mesh.export(outname)
+    # loads 2d & 3d keypoints
+    all_keypoints2d_left, all_keypoints2d_right = [], []
+    all_bboxes_left, all_bboxes_right = [], []
+    for cam in tqdm(cam_names, total=len(cam_names)):
+        if cam in cam_mapper:
+            keypoints2d_left = []
+            keypoints2d_right = []
+            bboxes_left = []
+            bboxes_right = []
+            ap_keypoints_path_left = os.path.join(keypoints2d_dir_left, f"{cam_mapper[cam]}.jsonl")
+            ap_keypoints_path_right = os.path.join(keypoints2d_dir_right, f"{cam_mapper[cam]}.jsonl")
+            bboxes_path_left = os.path.join(bboxes_dir_right, f"{cam_mapper[cam]}.jsonl")
+            bboxes_path_right = os.path.join(bboxes_dir_left, f"{cam_mapper[cam]}.jsonl")
+            with open(ap_keypoints_path_left, "r") as fl, open(ap_keypoints_path_right, "r") as fr, open(bboxes_path_left, "r") as fbl, open(bboxes_path_right, "r") as fbr:
+                for l_idx, (linel, liner, linebl, linebr) in enumerate(zip(fl, fr, fbl, fbr)):
+                    if l_idx in chosen_frames:
+                        keypoints2d_left.append(np.array(ujson.loads(linel)).reshape(-1, 3))
+                        keypoints2d_right.append(np.array(ujson.loads(liner)).reshape(-1, 3))
+                        bboxes_left.append(np.array(ujson.loads(linebl) + [1.0]))
+                        bboxes_right.append(np.array(ujson.loads(linebr) + [1.0]))
+            all_keypoints2d_left.append(np.asarray(keypoints2d_left))
+            all_keypoints2d_right.append(np.asarray(keypoints2d_right))
+            all_bboxes_left.append(np.asarray(bboxes_left))
+            all_bboxes_right.append(np.asarray(bboxes_right))
             
-        nf += 1
+    all_keypoints2d_left = np.asarray(all_keypoints2d_left)
+    all_keypoints2d_right = np.asarray(all_keypoints2d_right)
+    all_bboxes_left = np.asarray(all_bboxes_left)
+    all_bboxes_right = np.asarray(all_bboxes_right)
+    all_keypoints2d_left = np.swapaxes(all_keypoints2d_left, 0, 1)
+    all_keypoints2d_right = np.swapaxes(all_keypoints2d_right, 0, 1)
+    all_bboxes_left = np.swapaxes(all_bboxes_left, 0, 1)
+    all_bboxes_right = np.swapaxes(all_bboxes_right, 0, 1)
 
-    if not args.save_frame:
-        outhand_mano.release()
-        outhand_2d.release()
-        outhand_3d.release()
+    keypoints3d_right, keypoints3d_left = [], []
+    with open(keypt3d_file_left, "r") as fl, open(keypt3d_file_right, "r") as fr:
+        for l_idx, (linel, liner) in enumerate(zip(fl, fr)):
+            if l_idx in chosen_frames:
+                keypoints3d_left.append(np.array(ujson.loads(linel)).reshape(-1, 4))
+                keypoints3d_right.append(np.array(ujson.loads(liner)).reshape(-1, 4))
+    keypoints3d_left = np.asarray(keypoints3d_left)
+    keypoints3d_right = np.asarray(keypoints3d_right)
+
+    # loads the mano model
+    with Timer('Loading {}, {}'.format(args.model, args.gender), not False):
+        body_model_right = load_model(gender=args.gender, model_type=args.model, model_path="data/smplx", num_pca_comps=6, use_pca=True, use_flat_mean=True)
+
+    with Timer('Loading {}, {}'.format(args.model, args.gender), not False):
+        body_model_left = load_model(gender=args.gender, model_type=args.model.replace('r', 'l'), model_path="data/smplx", num_pca_comps=6, use_pca=True, use_flat_mean=True)
+
+    # fits the mano model
+    dataset_config = CONFIG[args.body]
+
+    params_right = smpl_from_keypoints3d2d(body_model_right, keypoints3d_right, all_keypoints2d_right, all_bboxes_right, projs, 
+        config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
+    # params_right = smpl_from_keypoints3d(body_model, keypoints3d_right, 
+    #     config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
+
+    params_left = smpl_from_keypoints3d2d(body_model_left, keypoints3d_left, all_keypoints2d_left, all_bboxes_left, projs, 
+        config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
+    # params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left, 
+    #     config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
+
+
+    # visualize model
+    if args.vis_smpl or args.save_mesh or args.vis_2d_repro or args.vis_3d_repro:
+        import trimesh
+
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        if args.vis_smpl:
+            outhand_mano = f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}'
+            os.makedirs(outhand_mano, exist_ok=True)
+            if not args.save_frame:
+                outhand_mano = cv2.VideoWriter(f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}.mp4', fourcc, 30.0, (3111, 1000, )) if args.vis_smpl else None
+        if args.vis_2d_repro:
+            outhand_2d = f'{output_path}/repro_2d/{str(selected_vid_idx).zfill(3)}'
+            os.makedirs(outhand_2d, exist_ok=True)
+            if not args.save_frame:
+                outhand_2d = cv2.VideoWriter(f'{output_path}/repro_2d/{str(selected_vid_idx).zfill(3)}.mp4', fourcc, 30.0, (3111, 1000, )) if args.vis_smpl else None
+        if args.vis_3d_repro:
+            outhand_3d = f'{output_path}/repro_3d/{str(selected_vid_idx).zfill(3)}'
+            os.makedirs(outhand_3d, exist_ok=True)
+            if not args.save_frame:
+                outhand_3d = cv2.VideoWriter(f'{output_path}/repro_3d/{str(selected_vid_idx).zfill(3)}.mp4', fourcc, 30.0, (3111, 1000, )) if args.vis_smpl else None
+
+        nf = 0
+        
+        reader = Reader("video", image_dir, ith=selected_vid_idx)
+        for abs_idx, (frames, idx) in tqdm(enumerate(reader(chosen_frames)), total=len(chosen_frames)):
+            images = []
+            c_idx = 0
+            for cam in cam_names:
+                if cam in cam_mapper:
+                    image = frames[cam_mapper[cam]]
+                    if args.undistort:
+                        image = param_utils.undistort_image(intrs[c_idx], dist_intrs[c_idx], dists[c_idx], image)
+                        c_idx += 1
+                    images.append(image)
+            
+            param_right = select_nf(params_right, nf)
+            param_left = select_nf(params_left, nf)
+            # visualizing the model
+            if args.vis_smpl:
+                vertices_right = body_model_right(return_verts=True, return_tensor=False, **param_right)
+                vertices_left = body_model_left(return_verts=True, return_tensor=False, **param_left)
+                vertices = np.concatenate((vertices_right[0], vertices_left[0]), axis=0)
+                faces = np.concatenate((body_model_right.faces, vertices_right[0].shape[0]+body_model_left.faces), axis=0)
+                image_vis = vis_smpl(args, vertices=vertices, faces=faces, images=images, nf=nf, cameras=cameras, add_back=True, out_dir=outhand_mano)
+                
+            # visualize keypoint reprojection
+            vis_config = CONFIG['handlr']
+            if args.vis_2d_repro:
+                keypoints2d = np.concatenate((all_keypoints2d_right[abs_idx], all_keypoints2d_left[abs_idx]), axis=1)
+                kpts_repro = keypoints2d
+                vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_2d)
+            
+            if args.vis_3d_repro:
+            #     keypoints = body_model(return_verts=False, return_tensor=False, **param)[0]
+                keypoints = np.concatenate((keypoints3d_right[abs_idx], keypoints3d_left[abs_idx]), axis=0)
+                kpts_repro = projectN3(keypoints, projs)
+                kpts_repro[:, :, 2] = 0.5
+                vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_3d)
+
+            # save the mesh
+            if args.save_mesh:
+                vertices = np.concatenate((vertices_right[0], vertices_left[0]), axis=0)
+                faces = np.concatenate((body_model_right.faces, np.amax(body_model_right.faces)+body_model_left.faces), axis=0)
+                mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+                outdir = os.path.join(output_path, f'meshes/{str(selected_vid_idx).zfill(3)}')
+                os.makedirs(outdir, exist_ok=True)
+                outname = os.path.join(outdir, '{:08d}.obj'.format(nf))
+                mesh.export(outname)
+                
+            nf += 1
+
+        if not args.save_frame:
+            if args.vis_smpl:
+                outhand_mano.release()
+            if args.vis_2d_repro:
+                outhand_2d.release()
+            if args.vis_3d_repro:
+                outhand_3d.release()
