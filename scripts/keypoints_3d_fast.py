@@ -74,8 +74,8 @@ for selected_vid_idx in selected_vid_idxs:
 
 
     # Get files to process
-    reader = Reader(args.input_type, image_base, ith=selected_vid_idx)
-    print("Total frames",reader.frame_count)
+    reader = Reader(args.input_type, image_base, cams_to_remove=cams_to_remove, ith=selected_vid_idx)
+    print("Total frames", reader.frame_count)
 
 
     keypoints3d_dir = os.path.join(output_path, "keypoints_3d", str(selected_vid_idx).zfill(3))

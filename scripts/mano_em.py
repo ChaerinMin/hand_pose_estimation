@@ -110,8 +110,6 @@ for selected_vid_idx in selected_vid_idxs:
 
     chosen_frames = sorted(chosen_frames)
 
-
-
     # loads 2d & 3d keypoints
     all_keypoints2d_left, all_keypoints2d_right = [], []
     all_bboxes_left, all_bboxes_right = [], []
@@ -199,7 +197,8 @@ for selected_vid_idx in selected_vid_idxs:
 
         nf = 0
         
-        reader = Reader("video", image_dir, ith=selected_vid_idx)
+        reader = Reader("video", image_dir, cams_to_remove=cams_to_remove, ith=selected_vid_idx)
+        print(f"Total valid frames {len(chosen_frames)}/{reader.frame_count}")
         for abs_idx, (frames, idx) in tqdm(enumerate(reader(chosen_frames)), total=len(chosen_frames)):
             images = []
             c_idx = 0
