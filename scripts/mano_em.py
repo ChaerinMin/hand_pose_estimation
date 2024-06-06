@@ -13,7 +13,7 @@ import src.utils.params as param_utils
 from src.utils.parser import add_common_args
 from src.utils.cameras import removed_cameras, map_camera_names, get_projections
 from src.utils.easymocap_utils import vis_smpl, projectN3, vis_repro, load_model
-
+from src.utils.filter import apply_one_euro_filter_2d, apply_one_euro_filter_3d
 sys.path.append("./third-party/EasyMocap")
 from easymocap.mytools import Timer
 from easymocap.dataset import CONFIG
@@ -27,6 +27,7 @@ os.environ['PYOPENGL_PLATFORM'] = 'egl'
 parser = argparse.ArgumentParser("Mano Fitting Argument Parser")
 add_common_args(parser)
 parser.add_argument("--use_optim_params", action="store_true")
+parser.add_argument("--to_smooth", action="store_true", help="Whether to temporally smoothing the result")
 parser.add_argument("--use_filtered", action="store_true", help="Whether to use only filtered keypoints (binned)")
 parser.add_argument('--remove_side_cam', type=bool, default=True, help='Remove Side Cameras')
 parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove Bottom Cameras')
@@ -78,8 +79,18 @@ for cam in cams_to_remove:
 if args.ith == -1:
     folder0 = os.listdir(image_dir)[0]
     folder0_path = os.path.join(image_dir, folder0)
-    selected_vid_idxs = list(range(len(os.listdir(folder0_path))//2))
-else:    
+    total_video_idxs = len(os.listdir(folder0_path))//2
+    if args.start > 0:
+        if args.end > 0:
+            selected_vid_idxs = list(range(args.start, args.end))
+        else:
+            selected_vid_idxs = list(range(args.start, total_video_idxs))
+    else:
+        if args.end > 0:
+            selected_vid_idxs = list(range(args.end))
+        else:
+            selected_vid_idxs = list(range(total_video_idxs))
+else:       
     selected_vid_idxs = [args.ith]
 
 for selected_vid_idx in selected_vid_idxs:
@@ -153,6 +164,11 @@ for selected_vid_idx in selected_vid_idxs:
     keypoints3d_left = np.asarray(keypoints3d_left)
     keypoints3d_right = np.asarray(keypoints3d_right)
 
+    if args.to_smooth:
+        print('Smoothing Keypoints 3D...')
+        keypoints3d_left = apply_one_euro_filter_3d(keypoints3d_left, mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+        keypoints3d_right = apply_one_euro_filter_3d(keypoints3d_right, mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+    
     # loads the mano model
     with Timer('Loading {}, {}'.format(args.model, args.gender), not False):
         body_model_right = load_model(gender=args.gender, model_type=args.model, model_path="data/smplx", num_pca_comps=6, use_pca=True, use_flat_mean=True)
@@ -163,93 +179,104 @@ for selected_vid_idx in selected_vid_idxs:
     # fits the mano model
     dataset_config = CONFIG[args.body]
 
-    params_right = smpl_from_keypoints3d2d(body_model_right, keypoints3d_right, all_keypoints2d_right, all_bboxes_right, projs, 
-        config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
-    # params_right = smpl_from_keypoints3d(body_model, keypoints3d_right, 
-    #     config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
+    if len(keypoints3d_right.shape) == 3:
+        params_right = smpl_from_keypoints3d2d(body_model_right, keypoints3d_right, all_keypoints2d_right, all_bboxes_right, projs, 
+            config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
+        # params_right = smpl_from_keypoints3d(body_model, keypoints3d_right, 
+        #     config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
+        params_left = smpl_from_keypoints3d2d(body_model_left, keypoints3d_left, all_keypoints2d_left, all_bboxes_left, projs, 
+            config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
+        # params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left, 
+        #     config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
 
-    params_left = smpl_from_keypoints3d2d(body_model_left, keypoints3d_left, all_keypoints2d_left, all_bboxes_left, projs, 
-        config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
-    # params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left, 
-    #     config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
+        if args.to_smooth:
+            print('Smoothing Manos...')
+            params_right['Rh'] = apply_one_euro_filter_2d(params_right['Rh'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+            params_left['Rh'] = apply_one_euro_filter_2d(params_left['Rh'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+            params_right['Th'] = apply_one_euro_filter_2d(params_right['Th'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+            params_left['Th'] = apply_one_euro_filter_2d(params_left['Th'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+            params_right['poses'] = apply_one_euro_filter_2d(params_right['poses'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+            params_left['poses'] = apply_one_euro_filter_2d(params_left['poses'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
 
+        # visualize model
+        if args.vis_smpl or args.save_mesh or args.vis_2d_repro or args.vis_3d_repro:
+            import trimesh
 
-    # visualize model
-    if args.vis_smpl or args.save_mesh or args.vis_2d_repro or args.vis_3d_repro:
-        import trimesh
-
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        if args.vis_smpl:
-            outhand_mano = f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}'
-            os.makedirs(outhand_mano, exist_ok=True)
-            if not args.save_frame:
-                outhand_mano = cv2.VideoWriter(f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}.mp4', fourcc, 30.0, (3111, 1000, )) if args.vis_smpl else None
-        if args.vis_2d_repro:
-            outhand_2d = f'{output_path}/repro_2d/{str(selected_vid_idx).zfill(3)}'
-            os.makedirs(outhand_2d, exist_ok=True)
-            if not args.save_frame:
-                outhand_2d = cv2.VideoWriter(f'{output_path}/repro_2d/{str(selected_vid_idx).zfill(3)}.mp4', fourcc, 30.0, (3111, 1000, )) if args.vis_smpl else None
-        if args.vis_3d_repro:
-            outhand_3d = f'{output_path}/repro_3d/{str(selected_vid_idx).zfill(3)}'
-            os.makedirs(outhand_3d, exist_ok=True)
-            if not args.save_frame:
-                outhand_3d = cv2.VideoWriter(f'{output_path}/repro_3d/{str(selected_vid_idx).zfill(3)}.mp4', fourcc, 30.0, (3111, 1000, )) if args.vis_smpl else None
-
-        nf = 0
-        
-        reader = Reader("video", image_dir, cams_to_remove=cams_to_remove, ith=selected_vid_idx)
-        print(f"Total valid frames {len(chosen_frames)}/{reader.frame_count}")
-        for abs_idx, (frames, idx) in tqdm(enumerate(reader(chosen_frames)), total=len(chosen_frames)):
-            images = []
-            c_idx = 0
-            for cam in cam_names:
-                if cam in cam_mapper:
-                    image = frames[cam_mapper[cam]]
-                    if args.undistort:
-                        image = param_utils.undistort_image(intrs[c_idx], dist_intrs[c_idx], dists[c_idx], image)
-                        c_idx += 1
-                    images.append(image)
-            
-            param_right = select_nf(params_right, nf)
-            param_left = select_nf(params_left, nf)
-            # visualizing the model
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             if args.vis_smpl:
-                vertices_right = body_model_right(return_verts=True, return_tensor=False, **param_right)
-                vertices_left = body_model_left(return_verts=True, return_tensor=False, **param_left)
-                vertices = np.concatenate((vertices_right[0], vertices_left[0]), axis=0)
-                faces = np.concatenate((body_model_right.faces, vertices_right[0].shape[0]+body_model_left.faces), axis=0)
-                image_vis = vis_smpl(args, vertices=vertices, faces=faces, images=images, nf=nf, cameras=cameras, add_back=True, out_dir=outhand_mano)
-                
-            # visualize keypoint reprojection
-            vis_config = CONFIG['handlr']
+                if not args.save_frame:
+                    outhand_mano = cv2.VideoWriter(f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}.mp4', fourcc, 30.0, (3111, 1000, )) if args.vis_smpl else None
+                else:
+                    outhand_mano = f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}'
+                    os.makedirs(outhand_mano, exist_ok=True)
             if args.vis_2d_repro:
-                keypoints2d = np.concatenate((all_keypoints2d_right[abs_idx], all_keypoints2d_left[abs_idx]), axis=1)
-                kpts_repro = keypoints2d
-                vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_2d)
+                if not args.save_frame:
+                    outhand_2d = cv2.VideoWriter(f'{output_path}/repro_2d/{str(selected_vid_idx).zfill(3)}.mp4', fourcc, 30.0, (3111, 1000, )) if args.vis_smpl else None
+                else:
+                    outhand_2d = f'{output_path}/repro_2d/{str(selected_vid_idx).zfill(3)}'
+                    os.makedirs(outhand_2d, exist_ok=True)
+            if args.vis_3d_repro:
+                if not args.save_frame:
+                    outhand_3d = cv2.VideoWriter(f'{output_path}/repro_3d/{str(selected_vid_idx).zfill(3)}.mp4', fourcc, 30.0, (3111, 1000, )) if args.vis_smpl else None
+                else:
+                    outhand_3d = f'{output_path}/repro_3d/{str(selected_vid_idx).zfill(3)}'
+                    os.makedirs(outhand_3d, exist_ok=True)
+            nf = 0
             
-            if args.vis_3d_repro:
-            #     keypoints = body_model(return_verts=False, return_tensor=False, **param)[0]
-                keypoints = np.concatenate((keypoints3d_right[abs_idx], keypoints3d_left[abs_idx]), axis=0)
-                kpts_repro = projectN3(keypoints, projs)
-                kpts_repro[:, :, 2] = 0.5
-                vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_3d)
-
-            # save the mesh
-            if args.save_mesh:
-                vertices = np.concatenate((vertices_right[0], vertices_left[0]), axis=0)
-                faces = np.concatenate((body_model_right.faces, np.amax(body_model_right.faces)+body_model_left.faces), axis=0)
-                mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-                outdir = os.path.join(output_path, f'meshes/{str(selected_vid_idx).zfill(3)}')
-                os.makedirs(outdir, exist_ok=True)
-                outname = os.path.join(outdir, '{:08d}.obj'.format(nf))
-                mesh.export(outname)
+            reader = Reader("video", image_dir, cams_to_remove=cams_to_remove, ith=selected_vid_idx)
+            print(f"Total valid frames {len(chosen_frames)}/{reader.frame_count}")
+            for abs_idx, (frames, idx) in tqdm(enumerate(reader(chosen_frames)), total=len(chosen_frames)):
+                images = []
+                c_idx = 0
+                for cam in cam_names:
+                    if cam in cam_mapper:
+                        image = frames[cam_mapper[cam]]
+                        if args.undistort:
+                            image = param_utils.undistort_image(intrs[c_idx], dist_intrs[c_idx], dists[c_idx], image)
+                            c_idx += 1
+                        images.append(image)
                 
-            nf += 1
+                param_right = select_nf(params_right, nf)
+                param_left = select_nf(params_left, nf)
+                
+                # visualizing the model
+                if args.vis_smpl:
+                    vertices_right = body_model_right(return_verts=True, return_tensor=False, **param_right)
+                    vertices_left = body_model_left(return_verts=True, return_tensor=False, **param_left)
+                    vertices = np.concatenate((vertices_right[0], vertices_left[0]), axis=0)
+                    faces = np.concatenate((body_model_right.faces, vertices_right[0].shape[0]+body_model_left.faces), axis=0)
+                    image_vis = vis_smpl(args, vertices=vertices, faces=faces, images=images, nf=nf, cameras=cameras, add_back=True, out_dir=outhand_mano)
+                    
+                # visualize keypoint reprojection
+                vis_config = CONFIG['handlr']
+                if args.vis_2d_repro:
+                    keypoints2d = np.concatenate((all_keypoints2d_right[abs_idx], all_keypoints2d_left[abs_idx]), axis=1)
+                    kpts_repro = keypoints2d
+                    vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_2d)
+                
+                if args.vis_3d_repro:
+                #     keypoints = body_model(return_verts=False, return_tensor=False, **param)[0]
+                    keypoints = np.concatenate((keypoints3d_right[abs_idx], keypoints3d_left[abs_idx]), axis=0)
+                    kpts_repro = projectN3(keypoints, projs)
+                    kpts_repro[:, :, 2] = 0.5
+                    vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_3d)
 
-        if not args.save_frame:
-            if args.vis_smpl:
-                outhand_mano.release()
-            if args.vis_2d_repro:
-                outhand_2d.release()
-            if args.vis_3d_repro:
-                outhand_3d.release()
+                # save the mesh
+                if args.save_mesh:
+                    vertices = np.concatenate((vertices_right[0], vertices_left[0]), axis=0)
+                    faces = np.concatenate((body_model_right.faces, np.amax(body_model_right.faces)+body_model_left.faces), axis=0)
+                    mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+                    outdir = os.path.join(output_path, f'meshes/{str(selected_vid_idx).zfill(3)}')
+                    os.makedirs(outdir, exist_ok=True)
+                    outname = os.path.join(outdir, '{:08d}.obj'.format(nf))
+                    mesh.export(outname)
+                    
+                nf += 1
+
+            if not args.save_frame:
+                if args.vis_smpl:
+                    outhand_mano.release()
+                if args.vis_2d_repro:
+                    outhand_2d.release()
+                if args.vis_3d_repro:
+                    outhand_3d.release()

@@ -75,7 +75,6 @@ class Reader():
         for vid in self.vids:
             cap = cv2.VideoCapture(vid)
             frame_count = int(ffmpeg.probe(vid, cmd="ffprobe")["streams"][0]["nb_frames"])
-            print(frame_count, self.frame_count, vid)
             self.frame_count = min(self.frame_count, frame_count)
             cam_name = os.path.basename(vid).split(".")[0]
             self.streams[cam_name] = cap
