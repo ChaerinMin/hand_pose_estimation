@@ -1,6 +1,6 @@
 import cv2
 
-def frame_preprocess(path):
+def frame_preprocess(path, undistort=False, intr=None, dist_intr=None, dist=None):
     stream = cv2.VideoCapture(path)
     assert stream.isOpened(), 'Cannot capture source'
 
@@ -19,11 +19,17 @@ def frame_preprocess(path):
                 break
 
             # orig_imgs.append(frame[:, :, ::-1])
+            if undistort:
+                frame = cv2.undistort(frame, intr, dist, None, dist_intr)
             orig_imgs.append(frame)
             im_names.append(f'{frame_num:08d}' + '.jpg')
             frame_num += 1
-
+    H, W, _ = frame.shape
     stream.release()
 
-    print(f'Total number of frames: {frame_num} in {path}')
-    return im_names, orig_imgs
+    # print(f'Total number of frames: {frame_num} in {path}')
+    return im_names, orig_imgs, H, W
+
+def create_video_writer(filename, frame_size, fps=30):
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec for MP4
+    return cv2.VideoWriter(filename, fourcc, fps, frame_size)

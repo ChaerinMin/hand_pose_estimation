@@ -88,3 +88,22 @@ def get_undistort_params(intr, dist, img_size):
 def undistort_image(intr, dist_intr, dist, img):
     result = cv2.undistort(img, intr, dist, None, dist_intr)
     return result
+
+def undistort_points(points, cameras):
+    nViews = len(points)
+    pelvis_undis = []
+    for nv in range(nViews):
+        camera = {key:cameras[key][nv] for key in ['K', 'dist']}
+        if points[nv].shape[0] > 0:
+            keypoints = points[nv]
+            K = camera['K']
+            dist = camera['dist']
+            assert len(keypoints.shape) == 2, keypoints.shape
+            kpts = keypoints[:, None, :2]
+            kpts = np.ascontiguousarray(kpts)
+            kpts = cv2.undistortPoints(kpts, K, dist, P=K)
+            pelvis = np.hstack([kpts[:, 0], keypoints[:, 2:]])
+        else:
+            pelvis = points[nv].copy()
+        pelvis_undis.append(pelvis)
+    return pelvis_undis

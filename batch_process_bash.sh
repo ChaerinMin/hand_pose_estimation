@@ -1,20 +1,23 @@
-source ~/.bashrc
-conda activate /users/rfu7/data/anaconda/pose_env
-cd pose_estimation
+# source ~/.bashrc
+# conda activate /users/rfu7/data/anaconda/pose_env
+# cd pose_estimation
 
 ROOT_DIR="/users/rfu7/ssrinath/brics/non-pii/brics-mini"
-OUT_DIR="/users/rfu7/ssrinath/datasets/Action/brics-mini/2024-05-09" # "../data/processed"
-SESSION="2024-05-09"
-IDX_VIDEO="-1"
+OUT_DIR="/users/rfu7/ssrinath/datasets/Action/brics-mini/2024-06-17" # "../data/processed"
+SESSION="2024-06-17"
+IDX_VIDEO="0"
 IDX_START="-1"
 IDX_END="-1"
+ANCHOR_CAMERA="brics-odroid-002_cam0"
+
 # echo "########################## EXTRACT 2D KEYPOINTS ################################"
-# python scripts/keypoints_2d_yolo_vitpose.py -r $ROOT_DIR -s $SESSION -o $OUT_DIR --ith $IDX_VIDEO
+# python scripts/keypoints_2d_yolo_vitpose.py -r $ROOT_DIR -s $SESSION -o $OUT_DIR --ith $IDX_VIDEO --use_optim_params --anchor_camera $ANCHOR_CAMERA
 
 # echo "######################### TRIANGULATE 3D KEYPOINTS #########################"
-# python scripts/keypoints_3d_fast.py -r $ROOT_DIR -s $SESSION -o $OUT_DIR --ith $IDX_VIDEO --undistort --all_frames --easymocap --use_optim_params
+# python scripts/keypoints_3d_fast.py -r $ROOT_DIR -s $SESSION -o $OUT_DIR --ith $IDX_VIDEO \
+#         --undistort --all_frames --easymocap --use_optim_params --to_smooth  --anchor_camera $ANCHOR_CAMERA
 
 echo "################################ MANO FIT ##################################"
 python scripts/mano_em.py -r $ROOT_DIR -s $SESSION -o $OUT_DIR \
-        --model manor --body handr --undistort --ith $IDX_VIDEO --start $IDX_START --end $IDX_END\
-        --use_filtered --use_optim_params --to_smooth --vis_smpl # --save_frame # --vis_2d_repro --vis_3d_repro 
+        --model manor --body handr --undistort  --ith $IDX_VIDEO --start $IDX_START --end $IDX_END\
+        --use_filtered --use_optim_params --vis_smpl --vis_2d_repro --vis_3d_repro --to_smooth  --anchor_camera $ANCHOR_CAMERA # --save_frame

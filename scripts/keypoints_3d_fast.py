@@ -21,6 +21,7 @@ from src.utils.parser import add_common_args
 from src.utils.cameras import removed_cameras, map_camera_names, get_projections
 from src.utils.fingers import FINGER_IDX, TIP_IDX
 from src.triangulate import triangulate_joints, ransac_processor
+from src.utils.filter import apply_one_euro_filter_3d
 
 sys.path.append("./EasyMocap")
 from myeasymocap.operations.triangulate import SimpleTriangulate
@@ -30,6 +31,7 @@ from myeasymocap.operations.triangulate import SimpleTriangulate
 parser = argparse.ArgumentParser(description='AlphaPose Keypoints Parser')
 add_common_args(parser)
 parser.add_argument("--use_optim_params", action="store_true")
+parser.add_argument("--to_smooth", action="store_true", help="Whether to temporally smoothing the result")
 parser.add_argument("--all_frames", default=False, action="store_true")
 parser.add_argument("--easymocap", default=False, action="store_true", help='use Easymocap for triangulation')
 parser.add_argument('--remove_side_cam', type=bool, default=True, help='Remove Side Cameras')
@@ -69,15 +71,18 @@ for selected_vid_idx in selected_vid_idxs:
     keypoints2d_dir_left = os.path.join(output_path, "keypoints_2d", "left",  str(selected_vid_idx).zfill(3))
 
     cam_mapper = map_camera_names(keypoints2d_dir_right, cam_names)
-    intrs, projs, dist_intrs, dists, cameras = get_projections(args, params, cam_names, cam_mapper, easymocap_format=True)
-    print("Total Views:", len(cam_mapper.keys()))
-
 
     # Get files to process
-    reader = Reader(args.input_type, image_base, cams_to_remove=cams_to_remove, ith=selected_vid_idx)
+    reader = Reader(args.input_type, image_base, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=args.anchor_camera if args.anchor_camera else None)
+    extra_cams_to_remove = reader.to_delete
+    cur_cam_names = cam_names.copy()
+    for cam in extra_cams_to_remove:
+        if cam in cur_cam_names:
+            cur_cam_names.remove(cam)
+    print("Total Views:", len(cur_cam_names))
     print("Total frames", reader.frame_count)
-
-
+    intrs, projs, dist_intrs, dists, cameras = get_projections(args, params, cur_cam_names, cam_mapper, easymocap_format=True)
+    
     keypoints3d_dir = os.path.join(output_path, "keypoints_3d", str(selected_vid_idx).zfill(3))
     try:
         shutil.rmtree(keypoints3d_dir)
@@ -93,7 +98,7 @@ for selected_vid_idx in selected_vid_idxs:
 
     all_keypoints2d_left = []
     all_keypoints2d_right = []
-    for cam in tqdm(cam_names, total=len(cam_names)):
+    for cam in cur_cam_names:
         if cam in cam_mapper:
             keypoints2d_left = []
             keypoints2d_right = []
@@ -104,8 +109,13 @@ for selected_vid_idx in selected_vid_idxs:
                     if l_idx in chosen_frames:
                         keypoints2d_left.append(np.array(ujson.loads(linel)).reshape(-1, 3))
                         keypoints2d_right.append(np.array(ujson.loads(liner)).reshape(-1, 3))
-            all_keypoints2d_left.append(np.asarray(keypoints2d_left))
-            all_keypoints2d_right.append(np.asarray(keypoints2d_right))
+            keypoints2d_left = np.asarray(keypoints2d_left)
+            keypoints2d_right = np.asarray(keypoints2d_right)
+            if args.to_smooth:
+                keypoints2d_left[:2] = apply_one_euro_filter_3d(keypoints2d_left[:2], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+                keypoints2d_right[:2] = apply_one_euro_filter_3d(keypoints2d_right[:2], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+            all_keypoints2d_left.append(keypoints2d_left)
+            all_keypoints2d_right.append(keypoints2d_right)
     all_keypoints2d_left = np.asarray(all_keypoints2d_left)
     all_keypoints2d_right = np.asarray(all_keypoints2d_right)
 

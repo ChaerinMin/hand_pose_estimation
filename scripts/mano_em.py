@@ -75,7 +75,6 @@ for cam in cams_to_remove:
     if cam in cam_names:
         cam_names.remove(cam)
 
-
 if args.ith == -1:
     folder0 = os.listdir(image_dir)[0]
     folder0_path = os.path.join(image_dir, folder0)
@@ -103,10 +102,6 @@ for selected_vid_idx in selected_vid_idxs:
     keypt3d_file_left = os.path.join(keypoints3d_dir, "left.jsonl")
     keypt3d_file_right = os.path.join(keypoints3d_dir, "right.jsonl")
 
-    cam_mapper = map_camera_names(keypoints2d_dir_right, cam_names)
-    intrs, projs, dist_intrs, dists, cameras = get_projections(args, params, cam_names, cam_mapper)
-
-
     # loads the selected frames
     if args.use_filtered:
         chosen_path_left = os.path.join(keypoints3d_dir, f"chosen_frames_left.json")
@@ -120,11 +115,21 @@ for selected_vid_idx in selected_vid_idxs:
         chosen_frames = range(args.start, args.end, args.stride)
 
     chosen_frames = sorted(chosen_frames)
+    
+    reader = Reader("video", image_dir, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=args.anchor_camera if args.anchor_camera else None)
+    print(f"Total valid frames {len(chosen_frames)}/{reader.frame_count}")
+    cam_mapper = map_camera_names(keypoints2d_dir_right, cam_names)
+    extra_cams_to_remove = reader.to_delete
+    cur_cam_names = cam_names.copy()
+    for cam in extra_cams_to_remove:
+        if cam in cur_cam_names:
+            cur_cam_names.remove(cam)
+    intrs, projs, dist_intrs, dists, cameras = get_projections(args, params, cur_cam_names, cam_mapper, easymocap_format=True)
 
     # loads 2d & 3d keypoints
     all_keypoints2d_left, all_keypoints2d_right = [], []
     all_bboxes_left, all_bboxes_right = [], []
-    for cam in tqdm(cam_names, total=len(cam_names)):
+    for cam in cur_cam_names:
         if cam in cam_mapper:
             keypoints2d_left = []
             keypoints2d_right = []
@@ -154,7 +159,11 @@ for selected_vid_idx in selected_vid_idxs:
     all_keypoints2d_right = np.swapaxes(all_keypoints2d_right, 0, 1)
     all_bboxes_left = np.swapaxes(all_bboxes_left, 0, 1)
     all_bboxes_right = np.swapaxes(all_bboxes_right, 0, 1)
-
+    for nf in range(all_keypoints2d_left.shape[0]):
+        all_keypoints2d_left[nf, :, :, :2] = param_utils.undistort_points(all_keypoints2d_left[nf, :, :, :2], cameras)
+    for nf in range(all_keypoints2d_right.shape[0]):
+        all_keypoints2d_right[nf, :, :, :2] = param_utils.undistort_points(all_keypoints2d_right[nf, :, :, :2], cameras)
+        
     keypoints3d_right, keypoints3d_left = [], []
     with open(keypt3d_file_left, "r") as fl, open(keypt3d_file_right, "r") as fr:
         for l_idx, (linel, liner) in enumerate(zip(fl, fr)):
@@ -163,11 +172,6 @@ for selected_vid_idx in selected_vid_idxs:
                 keypoints3d_right.append(np.array(ujson.loads(liner)).reshape(-1, 4))
     keypoints3d_left = np.asarray(keypoints3d_left)
     keypoints3d_right = np.asarray(keypoints3d_right)
-
-    if args.to_smooth:
-        print('Smoothing Keypoints 3D...')
-        keypoints3d_left = apply_one_euro_filter_3d(keypoints3d_left, mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
-        keypoints3d_right = apply_one_euro_filter_3d(keypoints3d_right, mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
     
     # loads the mano model
     with Timer('Loading {}, {}'.format(args.model, args.gender), not False):
@@ -180,14 +184,19 @@ for selected_vid_idx in selected_vid_idxs:
     dataset_config = CONFIG[args.body]
 
     if len(keypoints3d_right.shape) == 3:
-        params_right = smpl_from_keypoints3d2d(body_model_right, keypoints3d_right, all_keypoints2d_right, all_bboxes_right, projs, 
-            config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
-        # params_right = smpl_from_keypoints3d(body_model, keypoints3d_right, 
-        #     config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
-        params_left = smpl_from_keypoints3d2d(body_model_left, keypoints3d_left, all_keypoints2d_left, all_bboxes_left, projs, 
-            config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
-        # params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left, 
-        #     config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 0.1}, weight_pose=None)
+        if args.to_smooth:
+            print('Smoothing Keypoints 3D...')
+            keypoints3d_left[:3] = apply_one_euro_filter_3d(keypoints3d_left[:3], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+            keypoints3d_right[:3] = apply_one_euro_filter_3d(keypoints3d_right[:3], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+        
+        # params_right = smpl_from_keypoints3d2d(body_model_right, keypoints3d_right, all_keypoints2d_right, all_bboxes_right, projs, 
+        #     config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 5}, weight_pose=None)
+        params_right = smpl_from_keypoints3d(body_model_right, keypoints3d_right, 
+            config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5}, weight_pose=None)
+        # params_left = smpl_from_keypoints3d2d(body_model_left, keypoints3d_left, all_keypoints2d_left, all_bboxes_left, projs, 
+        #     config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 5}, weight_pose=None)
+        params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left, 
+            config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5}, weight_pose=None)
 
         if args.to_smooth:
             print('Smoothing Manos...')
@@ -205,30 +214,31 @@ for selected_vid_idx in selected_vid_idxs:
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             if args.vis_smpl:
                 if not args.save_frame:
-                    outhand_mano = cv2.VideoWriter(f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}.mp4', fourcc, 30.0, (3111, 1000, )) if args.vis_smpl else None
+                    os.makedirs(f'{output_path}/mano', exist_ok=True)
+                    outhand_mano_path = f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}.mp4'
                 else:
-                    outhand_mano = f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}'
-                    os.makedirs(outhand_mano, exist_ok=True)
+                    outhand_mano_path = f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}'
+                    os.makedirs(outhand_mano_path, exist_ok=True)
             if args.vis_2d_repro:
                 if not args.save_frame:
-                    outhand_2d = cv2.VideoWriter(f'{output_path}/repro_2d/{str(selected_vid_idx).zfill(3)}.mp4', fourcc, 30.0, (3111, 1000, )) if args.vis_smpl else None
+                    os.makedirs(f'{output_path}/repro_2d', exist_ok=True)
+                    outhand_2d_path = f'{output_path}/repro_2d/{str(selected_vid_idx).zfill(3)}.mp4'
                 else:
-                    outhand_2d = f'{output_path}/repro_2d/{str(selected_vid_idx).zfill(3)}'
-                    os.makedirs(outhand_2d, exist_ok=True)
+                    outhand_2d_path = f'{output_path}/repro_2d/{str(selected_vid_idx).zfill(3)}'
+                    os.makedirs(outhand_2d_path, exist_ok=True)
             if args.vis_3d_repro:
                 if not args.save_frame:
-                    outhand_3d = cv2.VideoWriter(f'{output_path}/repro_3d/{str(selected_vid_idx).zfill(3)}.mp4', fourcc, 30.0, (3111, 1000, )) if args.vis_smpl else None
+                    os.makedirs(f'{output_path}/repro_3d', exist_ok=True)
+                    outhand_3d_path = f'{output_path}/repro_3d/{str(selected_vid_idx).zfill(3)}.mp4'
                 else:
-                    outhand_3d = f'{output_path}/repro_3d/{str(selected_vid_idx).zfill(3)}'
-                    os.makedirs(outhand_3d, exist_ok=True)
+                    outhand_3d_path = f'{output_path}/repro_3d/{str(selected_vid_idx).zfill(3)}'
+                    os.makedirs(outhand_3d_path, exist_ok=True)
             nf = 0
             
-            reader = Reader("video", image_dir, cams_to_remove=cams_to_remove, ith=selected_vid_idx)
-            print(f"Total valid frames {len(chosen_frames)}/{reader.frame_count}")
             for abs_idx, (frames, idx) in tqdm(enumerate(reader(chosen_frames)), total=len(chosen_frames)):
                 images = []
                 c_idx = 0
-                for cam in cam_names:
+                for cam in cur_cam_names:
                     if cam in cam_mapper:
                         image = frames[cam_mapper[cam]]
                         if args.undistort:
@@ -245,22 +255,31 @@ for selected_vid_idx in selected_vid_idxs:
                     vertices_left = body_model_left(return_verts=True, return_tensor=False, **param_left)
                     vertices = np.concatenate((vertices_right[0], vertices_left[0]), axis=0)
                     faces = np.concatenate((body_model_right.faces, vertices_right[0].shape[0]+body_model_left.faces), axis=0)
-                    image_vis = vis_smpl(args, vertices=vertices, faces=faces, images=images, nf=nf, cameras=cameras, add_back=True, out_dir=outhand_mano)
+                    image_vis = vis_smpl(args, vertices=vertices, faces=faces, images=images, nf=nf, cameras=cameras, add_back=True, out_dir=outhand_mano_path)
+                    if abs_idx == 0:
+                        outhand_mano = cv2.VideoWriter(outhand_mano_path, fourcc, 30.0, (image_vis.shape[1], image_vis.shape[0]))
+                    outhand_mano.write(image_vis)
                     
                 # visualize keypoint reprojection
                 vis_config = CONFIG['handlr']
                 if args.vis_2d_repro:
                     keypoints2d = np.concatenate((all_keypoints2d_right[abs_idx], all_keypoints2d_left[abs_idx]), axis=1)
                     kpts_repro = keypoints2d
-                    vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_2d)
-                
+                    image_vis = vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_2d_path)
+                    if abs_idx == 0:
+                        outhand_2d = cv2.VideoWriter(outhand_2d_path, fourcc, 30.0, (image_vis.shape[1], image_vis.shape[0]))
+                    outhand_2d.write(image_vis)
+                    
                 if args.vis_3d_repro:
                 #     keypoints = body_model(return_verts=False, return_tensor=False, **param)[0]
                     keypoints = np.concatenate((keypoints3d_right[abs_idx], keypoints3d_left[abs_idx]), axis=0)
                     kpts_repro = projectN3(keypoints, projs)
                     kpts_repro[:, :, 2] = 0.5
-                    vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_3d)
-
+                    images_vis = vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_3d_path)
+                    if abs_idx == 0:
+                        outhand_3d = cv2.VideoWriter(outhand_3d_path, fourcc, 30.0, (images_vis.shape[1], images_vis.shape[0]))
+                    outhand_3d.write(images_vis)
+                    
                 # save the mesh
                 if args.save_mesh:
                     vertices = np.concatenate((vertices_right[0], vertices_left[0]), axis=0)
@@ -276,7 +295,13 @@ for selected_vid_idx in selected_vid_idxs:
             if not args.save_frame:
                 if args.vis_smpl:
                     outhand_mano.release()
+                    os.system(f'ffmpeg -i {outhand_mano_path} -vcodec libx264 {outhand_mano_path} -y')
+                    print('Video Handler Released')
                 if args.vis_2d_repro:
                     outhand_2d.release()
+                    os.system(f'ffmpeg -i {outhand_2d_path} -vcodec libx264 {outhand_2d_path} -y')
+                    print('Video Handler Released')
                 if args.vis_3d_repro:
                     outhand_3d.release()
+                    os.system(f'ffmpeg -i {outhand_3d_path} -vcodec libx264 {outhand_3d_path} -y')
+                    print('Video Handler Released')

@@ -77,13 +77,13 @@ def triangulate_joints(keypoints, proj_mats, processor, conf_thresh_start=0.75, 
         if not computed or not model:
             #else:
             keypoints3d.append(np.array([0.,0.,0., 0.]))
-            residuals.append(np.array([9999999.]))
+            residuals.append(np.array(9999999.))
             print(f'missing one point at joint {joint}')
             
-
     keypoints3d = np.asarray(keypoints3d)
     residuals = np.asarray(residuals)
-    print(f'ransac output {keypoints3d.shape} keypoints')   
+    
+    # print(f'ransac output {keypoints3d.shape} keypoints')   
     return keypoints3d, residuals
 
 

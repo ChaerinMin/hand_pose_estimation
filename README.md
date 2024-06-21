@@ -62,6 +62,7 @@ python scripts/keypoints_2d_yolo_vitpose.py -r $ROOT_DIR -s $SESSION -o $OUT_DIR
 # -s SESSION to proceed, i.e., yyyy-mm-dd
 # -o OUTPUT directory to stores the output data. As brics-mini non-pii root folder is read-only.
 # --ith the IDX of the video to be proceed. We assume the ith snapshots are time-consistent. 
+# --anchor_camera For some reason, there might be random camera missing during filming. The anchor camera helps timestamp check. For time_diff|other_camera - anchor_camera| > 1s will not be considered during triangulation. 
 ```
 Notes: Inference time for the test data should be ~4 sec/video. If your inference time is unreasonable, you might get a slow GPU(re-apply a new one)/older torch/older cuda. 
 

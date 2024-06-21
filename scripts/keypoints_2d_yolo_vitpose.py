@@ -14,8 +14,10 @@ from collections import defaultdict
 
 import sys
 sys.path.append(".")
-from src.utils.video_reader import frame_preprocess
-from src.utils.cameras import removed_cameras
+from src.utils.reader_v2 import Reader
+from src.utils.video_handler import frame_preprocess
+from src.utils.cameras import removed_cameras, map_camera_names, get_projections
+import src.utils.params as param_utils
 from src.utils.parser import add_common_args
 from src.vitpose_wrapper import ViTPoseModel
 
@@ -82,7 +84,7 @@ def process_all_vitposes(pred_poses, kps_left_f, bbx_left_f, kps_right_f, bbx_ri
     bbx_right_f.write('\n')
     
 
-def process_all_yolo_results(results, bboxes_buffer, box_score_threshold=0.2):
+def process_all_yolo_results(results, bboxes_buffer, im_h, im_w, box_score_threshold=0.2, padding=5):
 
     for result in results:
         if len(result) == 0:
@@ -90,6 +92,13 @@ def process_all_yolo_results(results, bboxes_buffer, box_score_threshold=0.2):
         else:
             valid_idx = (result.boxes.cls==0) & (result.boxes.conf > box_score_threshold)
             pred_bboxes=result.boxes.xyxy[valid_idx].cpu().numpy()
+            padded_bboxes = np.copy(pred_bboxes)
+            padded_bboxes[:, 0:2] -= padding  # x_min - 10
+            padded_bboxes[:, 2:] += padding  # x_max + 10
+            padded_bboxes[:, 0] = np.clip(padded_bboxes[:, 0], 0, im_h)  # x_min
+            padded_bboxes[:, 1] = np.clip(padded_bboxes[:, 1], 0, im_w) # y_min
+            padded_bboxes[:, 2] = np.clip(padded_bboxes[:, 2], 0, im_h)  # x_max
+            padded_bboxes[:, 3] = np.clip(padded_bboxes[:, 3], 0, im_w) # y_max
             pred_scores=result.boxes.conf[valid_idx].cpu().numpy()
             pred_bboxes_scores = np.concatenate([pred_bboxes, pred_scores[:, None]], axis=1)
         bboxes_buffer.append(pred_bboxes_scores)
@@ -98,6 +107,7 @@ def process_all_yolo_results(results, bboxes_buffer, box_score_threshold=0.2):
 def main():
     parser = argparse.ArgumentParser(description='2D Keypoint Detection')
     add_common_args(parser)
+    parser.add_argument("--use_optim_params", action="store_true")
     parser.add_argument('--batch_size', type=int, default=256, help='Batch Size')
     parser.add_argument('--box_score_threshold', type=float, default=0.2, help='Confidence Threshold for BBX Detection')
     parser.add_argument('--yolo_model', type=str, default='yolov9c.pt', help='YOLO Model for BBX Detection')
@@ -111,6 +121,23 @@ def main():
     model = YOLO(args.yolo_model)
     
     input_path = os.path.join(args.root_dir, args.seq_path)
+
+    if args.use_optim_params:
+        params_txt = "optim_params.txt"
+    else:
+        params_txt = "params.txt"
+
+    params_path = os.path.join(args.out_dir, params_txt)
+
+    params = param_utils.read_params(params_path)
+    cam_names = list(params[:]["cam_name"])
+    cams_to_remove = removed_cameras(remove_side=args.remove_side_cam, remove_bottom=args.remove_bottom_cam)
+
+    for cam in cams_to_remove:
+        if cam in cam_names:
+            cam_names.remove(cam)
+    cam_mapper = map_camera_names(input_path, cam_names)
+    
     if args.ith == -1:
         folder0 = os.listdir(input_path)[0]
         folder0_path = os.path.join(input_path, folder0)
@@ -119,7 +146,8 @@ def main():
         selected_vid_idxs = [args.ith]
     
     for selected_vid_idx in selected_vid_idxs:
-        
+        print(f'Video ID {selected_vid_idx}...')
+
         output_kps_left_path = f'{args.out_dir}/keypoints_2d/left/{selected_vid_idx:03d}'
         output_bbx_left_path = f'{args.out_dir}/bboxes/left/{selected_vid_idx:03d}'
         output_kps_right_path = f'{args.out_dir}/keypoints_2d/right/{selected_vid_idx:03d}'
@@ -128,17 +156,22 @@ def main():
         os.makedirs(output_bbx_left_path, exist_ok=True)
         os.makedirs(output_kps_right_path, exist_ok=True)
         os.makedirs(output_bbx_right_path, exist_ok=True)
-        
-        cams_to_remove = removed_cameras(remove_side=args.remove_side_cam, remove_bottom=args.remove_bottom_cam)
-        
+
+        # Get files to process
+        reader = Reader(args.input_type, input_path, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=args.anchor_camera if args.anchor_camera else None)
+        extra_cams_to_remove = reader.to_delete
+        cur_cam_names = cam_names.copy()
+        for cam in extra_cams_to_remove:
+            if cam in cur_cam_names:
+                cur_cam_names.remove(cam)
+        print("Total Views:", len(cur_cam_names))
+        print("Total frames", reader.frame_count)
+        intrs, projs, dist_intrs, dists, cameras = get_projections(args, params, cur_cam_names, cam_mapper, easymocap_format=True)
+
         # Detect 2D Keypoints for all valid views
         time_list = []
-        cams = sorted([_ for _ in os.listdir(input_path) if _ not in cams_to_remove and 'imu' not in _ and 'mic' not in _])[:]
-        for cam_name in cams:
-            
-            input_video_path = glob(f"{input_path}/{cam_name}/*.mp4")[selected_vid_idx]
-
-            im_names, orig_imgs = frame_preprocess(input_video_path)
+        for v_idx, input_video_path in tqdm(enumerate(reader.vids), total=len(cur_cam_names)):
+            im_names, orig_imgs, im_h, im_w = frame_preprocess(input_video_path, args.undistort, intrs[v_idx], dist_intrs[v_idx], dists[v_idx])
             
             video_name = input_video_path.split('/')[-1].split('.')[0]
             
@@ -150,13 +183,13 @@ def main():
             start_time = time.time()
             with open(output_kps_left_file_path, 'w') as kps_left_f, open(output_bbx_left_file_path, 'w') as bbx_left_f, open(output_kps_right_file_path, 'w') as kps_right_f, open(output_bbx_right_file_path, 'w') as bbx_right_f:
                 frame_buffer, bboxes_buffer = [], []
-                for im_name, frame in tqdm(zip(im_names, orig_imgs), total=len(im_names)):
+                for im_name, frame in zip(im_names, orig_imgs):
                     frame_buffer.append(frame)
                     if len(frame_buffer) == args.batch_size:
                     
                         # Detect humans in image
                         results = model(frame_buffer, verbose=False, stream=True)
-                        process_all_yolo_results(results, bboxes_buffer, args.box_score_threshold)
+                        process_all_yolo_results(results, bboxes_buffer, im_h, im_w, args.box_score_threshold, padding=0)
                         
                         # Detect human keypoints for each person        
                         pred_poses = cpm.predict_pose_batch(
@@ -172,7 +205,7 @@ def main():
                 if len(frame_buffer) > 0:
                     # Detect humans in image
                     results = model(frame_buffer, verbose=False, stream=True)
-                    process_all_yolo_results(results, bboxes_buffer, args.box_score_threshold)
+                    process_all_yolo_results(results, bboxes_buffer, im_h, im_w, args.box_score_threshold, padding=5)
                     
                     # Detect human keypoints for each person               
                     pred_poses = cpm.predict_pose_batch(
@@ -182,9 +215,7 @@ def main():
                         
                     for pred_pose in pred_poses:
                         processed_pose = process_all_vitposes(pred_pose, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f)
-            time_list.append(time.time() - start_time)
-            print(f'Total Runtime:{time_list[-1]} s. Average Time {sum(time_list)/len(time_list)} s.')
-            
-            # exit(0)
+            time_list.append(time.time() - start_time)            
+        
 if __name__ == '__main__':
     main()

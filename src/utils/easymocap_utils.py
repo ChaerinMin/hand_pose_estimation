@@ -53,8 +53,8 @@ def vis_smpl(args, vertices, faces, images, nf, cameras, mode='smpl', extra_data
     if args.save_frame:
         outname = os.path.join(out_dir, '{:08d}.jpg'.format(nf))
         cv2.imwrite(outname, image_vis)
-    else:
-        out_dir.write(image_vis)
+    # else:
+    #     out_dir.write(image_vis)
     return image_vis
 
 
@@ -107,7 +107,7 @@ def vis_repro(args, images, kpts_repro, nf, config, to_img=True, mode='repro', o
     if args.save_frame:
         outname = os.path.join(outdir, '{:06d}.jpg'.format(nf))
         cv2.imwrite(outname, images_vis)
-    else:
-        outdir.write(images_vis)
+    # else:
+    #     outdir.write(images_vis)
     return images_vis
 # ----------------------------------------------------------------- #
