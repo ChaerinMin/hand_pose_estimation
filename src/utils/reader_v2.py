@@ -66,10 +66,11 @@ class Reader():
         else:
             pass
 
-
         # Sanity checks
-        assert (self.frame_count > 0) and (self.frame_count < int(1e9)), "No frames found"
-
+        assert(self.frame_count < int(1e9)), "No frames found"
+        if self.frame_count <= 0:
+            print("No frames found")
+            
         self.cur_frame = 0
     
     def _get_next_frame(self, frame_idx) -> Dict[str, np.ndarray]:

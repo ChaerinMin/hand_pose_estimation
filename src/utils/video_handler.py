@@ -1,4 +1,5 @@
 import cv2
+import os
 
 def frame_preprocess(path, undistort=False, intr=None, dist_intr=None, dist=None):
     stream = cv2.VideoCapture(path)
@@ -33,3 +34,19 @@ def frame_preprocess(path, undistort=False, intr=None, dist_intr=None, dist=None
 def create_video_writer(filename, frame_size, fps=30):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec for MP4
     return cv2.VideoWriter(filename, fourcc, fps, frame_size)
+
+def convert_video_ffmpeg(input_path):
+    temp_path = input_path + '.temp'
+    output_path = input_path
+    
+    # Rename the original file
+    os.rename(input_path, temp_path)
+    
+    # Construct the ffmpeg command with the -y option
+    ffmpeg_command = f'ffmpeg -i {temp_path} -vcodec libx264 -y {output_path}'
+    
+    # Execute the command
+    os.system(ffmpeg_command)
+    
+    # Remove the temporary file
+    os.remove(temp_path)

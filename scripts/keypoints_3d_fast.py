@@ -54,7 +54,13 @@ params_path = os.path.join(output_path, params_txt)
 
 params = param_utils.read_params(params_path)
 cam_names = list(params[:]["cam_name"])
-cams_to_remove = removed_cameras(remove_side=args.remove_side_cam, remove_bottom=args.remove_bottom_cam)
+removed_camera_path = os.path.join(output_path, 'ignore_camera.txt')
+if os.path.isfile(removed_camera_path):
+    with open(removed_camera_path) as file:
+        ignored_cameras = [line.rstrip() for line in file]
+else:
+    ignored_cameras = None
+cams_to_remove = removed_cameras(remove_side=args.remove_side_cam, remove_bottom=args.remove_bottom_cam, ignored_cameras=ignored_cameras)
 for cam in cams_to_remove:
     if cam in cam_names:
         cam_names.remove(cam)
@@ -62,11 +68,23 @@ for cam in cams_to_remove:
 if args.ith == -1:
     folder0 = os.listdir(image_base)[0]
     folder0_path = os.path.join(image_base, folder0)
-    selected_vid_idxs = list(range(len(os.listdir(folder0_path))//2))
-else:    
+    total_video_idxs = len(os.listdir(folder0_path))//2
+    if args.start > 0:
+        if args.end > 0:
+            selected_vid_idxs = list(range(args.start, args.end))
+        else:
+            selected_vid_idxs = list(range(args.start, total_video_idxs))
+    else:
+        if args.end > 0:
+            selected_vid_idxs = list(range(args.end))
+        else:
+            selected_vid_idxs = list(range(total_video_idxs))
+else:       
     selected_vid_idxs = [args.ith]
-
+    
 for selected_vid_idx in selected_vid_idxs:
+    print(f'Video ID {selected_vid_idx}...')
+    
     keypoints2d_dir_right = os.path.join(output_path, "keypoints_2d", "right", str(selected_vid_idx).zfill(3))
     keypoints2d_dir_left = os.path.join(output_path, "keypoints_2d", "left",  str(selected_vid_idx).zfill(3))
 
@@ -74,6 +92,9 @@ for selected_vid_idx in selected_vid_idxs:
 
     # Get files to process
     reader = Reader(args.input_type, image_base, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=args.anchor_camera if args.anchor_camera else None)
+    if reader.frame_count <= 0:
+        continue
+        
     extra_cams_to_remove = reader.to_delete
     cur_cam_names = cam_names.copy()
     for cam in extra_cams_to_remove:
