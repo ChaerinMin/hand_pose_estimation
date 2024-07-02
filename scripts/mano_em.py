@@ -185,10 +185,11 @@ for selected_vid_idx in selected_vid_idxs:
     
     # loads the mano model
     with Timer('Loading {}, {}'.format(args.model, args.gender), not False):
-        body_model_right = load_model(gender=args.gender, model_type=args.model, model_path="data/smplx", num_pca_comps=6, use_pca=True, use_flat_mean=True)
+        body_model_right = load_model(gender=args.gender, model_type=args.model, model_path="data/smplx", num_pca_comps=6, use_pose_blending=True, use_shape_blending=True, use_pca=False, use_flat_mean=False)
 
     with Timer('Loading {}, {}'.format(args.model, args.gender), not False):
-        body_model_left = load_model(gender=args.gender, model_type=args.model.replace('r', 'l'), model_path="data/smplx", num_pca_comps=6, use_pca=True, use_flat_mean=True)
+        body_model_left = load_model(gender=args.gender, model_type=args.model.replace('r', 'l'), model_path="data/smplx", num_pca_comps=6, use_pose_blending=True, use_shape_blending=True, use_pca=False, use_flat_mean=False)
+        # body_model_left = load_model(gender=args.gender, model_type=args.model, model_path="data/smplx", num_pca_comps=6, use_pca=True, use_flat_mean=True)
 
     # fits the mano model
     dataset_config = CONFIG[args.body]
@@ -198,15 +199,19 @@ for selected_vid_idx in selected_vid_idxs:
             print('Smoothing Keypoints 3D...')
             keypoints3d_left[:3] = apply_one_euro_filter_3d(keypoints3d_left[:3], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
             keypoints3d_right[:3] = apply_one_euro_filter_3d(keypoints3d_right[:3], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
-        
-        # params_right = smpl_from_keypoints3d2d(body_model_right, keypoints3d_right, all_keypoints2d_right, all_bboxes_right, projs, 
-        #     config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 5}, weight_pose=None)
-        params_right = smpl_from_keypoints3d(body_model_right, keypoints3d_right, 
-            config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5}, weight_pose=None)
-        # params_left = smpl_from_keypoints3d2d(body_model_left, keypoints3d_left, all_keypoints2d_left, all_bboxes_left, projs, 
-        #     config=dataset_config, args=args, weight_shape={'s3d': 5000., 'reg_shapes': 5}, weight_pose=None)
-        params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left, 
-            config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5}, weight_pose=None)
+
+        weight_pose = {
+            'k3d': 1e2, 'k2d': 2e-3,
+            'reg_poses': 1e-3, 'smooth_body': 1e2, 'smooth_poses': 1e2,
+        }
+        params_right = smpl_from_keypoints3d2d(body_model_right, keypoints3d_right, all_keypoints2d_right, all_bboxes_right, projs, 
+            config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose)
+        # params_right = smpl_from_keypoints3d(body_model_right, keypoints3d_right, 
+        #     config=dataset_config, args=args, weight_shape={'s3d': 5000, 'reg_shapes': 5}, weight_pose=weight_pose)
+        params_left = smpl_from_keypoints3d2d(body_model_left, keypoints3d_left, all_keypoints2d_left, all_bboxes_left, projs, 
+            config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose)
+        # params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left, 
+        #     config=dataset_config, args=args, weight_shape={'s3d': 5000, 'reg_shapes': 5}, weight_pose=weight_pose)
 
         if args.to_smooth:
             print('Smoothing Manos...')
@@ -239,7 +244,7 @@ for selected_vid_idx in selected_vid_idxs:
             if args.vis_smpl:
                 if not args.save_frame:
                     os.makedirs(f'{output_path}/mano', exist_ok=True)
-                    outhand_mano_path = f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}.mp4'
+                    outhand_mano_path = f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}_5smooth_1e5_5000_npca_nmshape.mp4'
                 else:
                     outhand_mano_path = f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}'
                     os.makedirs(outhand_mano_path, exist_ok=True)
@@ -278,12 +283,22 @@ for selected_vid_idx in selected_vid_idxs:
                     if args.vis_smpl:
                         vertices_right = body_model_right(return_verts=True, return_tensor=False, **param_right)
                         vertices_left = body_model_left(return_verts=True, return_tensor=False, **param_left)
-                        vertices = np.concatenate((vertices_right[0], vertices_left[0]), axis=0)
-                        faces = np.concatenate((body_model_right.faces, vertices_right[0].shape[0]+body_model_left.faces), axis=0)
+                        vertices = np.concatenate((vertices_left[0], vertices_right[0]), axis=0)
+                        faces = np.concatenate((body_model_left.faces, body_model_right.faces+vertices_left[0].shape[0]), axis=0)
                         image_vis = vis_smpl(args, vertices=vertices, faces=faces, images=images, nf=nf, cameras=cameras, add_back=True, out_dir=outhand_mano_path)
                         if abs_idx == 0:
                             outhand_mano = create_video_writer(outhand_mano_path, (image_vis.shape[1], image_vis.shape[0]), fps=30)
                         outhand_mano.write(image_vis)
+
+                    # save the mesh
+                    if args.save_mesh:
+                        vertices = np.concatenate((vertices_left[0], vertices_right[0]), axis=0)
+                        faces = np.concatenate((body_model_left.faces, body_model_right.faces+vertices_left[0].shape[0]), axis=0)
+                        mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+                        outdir = os.path.join(output_path, f'meshes/{str(selected_vid_idx).zfill(3)}')
+                        os.makedirs(outdir, exist_ok=True)
+                        outname = os.path.join(outdir, '{:08d}.obj'.format(nf))
+                        mesh.export(outname)
                         
                     # visualize keypoint reprojection
                     vis_config = CONFIG['handlr']
@@ -304,16 +319,6 @@ for selected_vid_idx in selected_vid_idxs:
                         if abs_idx == 0:
                             outhand_3d = create_video_writer(outhand_3d_path, (image_vis.shape[1], image_vis.shape[0]), fps=30)
                         outhand_3d.write(image_vis)
-                    
-                    # save the mesh
-                    if args.save_mesh:
-                        vertices = np.concatenate((vertices_right[0], vertices_left[0]), axis=0)
-                        faces = np.concatenate((body_model_right.faces, np.amax(body_model_right.faces)+body_model_left.faces), axis=0)
-                        mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-                        outdir = os.path.join(output_path, f'meshes/{str(selected_vid_idx).zfill(3)}')
-                        os.makedirs(outdir, exist_ok=True)
-                        outname = os.path.join(outdir, '{:08d}.obj'.format(nf))
-                        mesh.export(outname)
                     
                 nf += 1
 
