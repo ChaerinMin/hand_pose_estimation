@@ -141,7 +141,6 @@ for selected_vid_idx in selected_vid_idxs:
     all_keypoints2d_right = np.asarray(all_keypoints2d_right)
 
 
-
     keypt_file_left = os.path.join(keypoints3d_dir, "left.jsonl")
     keypt_file_right = os.path.join(keypoints3d_dir, "right.jsonl")
     chosen_frames_left = []

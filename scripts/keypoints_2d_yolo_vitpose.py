@@ -9,6 +9,7 @@ from tqdm import tqdm
 import ujson
 import time
 from ultralytics import YOLO, checks
+
 from typing import Dict, Optional
 from collections import defaultdict
 
@@ -20,6 +21,7 @@ from src.utils.cameras import removed_cameras, map_camera_names, get_projections
 import src.utils.params as param_utils
 from src.utils.parser import add_common_args
 from src.vitpose_wrapper import ViTPoseModel
+from src.hamer_wrapper import HAMER_CKPT_PATH, ViTDetDataset
 
 # ------------------------------ Alpha Pose Helpers ------------------------------ #
 
@@ -44,7 +46,53 @@ def process_hand_keypoints_batch(keypoints, validity_threshold, min_valid_keypoi
         
     return bboxes, reshaped_keypoints, valid_counts
 
-def process_all_vitposes(pred_poses, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f):                    
+def prorcess_all_hamerposes(hamer_batch, hamer_out, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f):
+    boxes = hamer_batch['boxes']
+    box_center = hamer_batch["box_center"].float()
+    box_size = hamer_batch["box_size"].float()
+    
+    batch_size = hamer_batch['img'].shape[0]
+    for n in range(batch_size):
+        is_right = hamer_batch['right'][n].cpu().numpy()
+        pred_keypoints_2d = hamer_out['pred_keypoints_2d'][n, :, :].squeeze()
+        multiplier = (2*is_right-1)
+        pred_keypoints_2d[:, 0] = pred_keypoints_2d[:, 0] * multiplier
+        joints = pred_keypoints_2d * box_size[n] + box_center[n, :]
+        
+        joints = joints.detach().cpu().numpy()
+        joints = np.hstack((joints, np.ones((21, 1)))).reshape(-1).tolist()
+        
+        box = boxes[n, :].tolist()
+        if is_right:
+            ujson.dump(joints, kps_right_f)
+            kps_right_f.write('\n')
+
+            ujson.dump(box, bbx_right_f)
+            bbx_right_f.write('\n')
+        else:
+            ujson.dump(joints, kps_left_f)
+            kps_left_f.write('\n')
+
+            ujson.dump(box, bbx_left_f)
+            bbx_left_f.write('\n')
+            
+    
+def process_all_vitposes_for_hamer(pred_poses, frame_buffer):
+    all_processed_bbox = []
+    is_right = []
+    for pred_pose in pred_poses:
+        processed_pose = process_all_vitposes(pred_pose)
+        all_processed_bbox.append(processed_pose['left_bbox'])
+        all_processed_bbox.append(processed_pose['right_bbox'])
+        is_right.extend([0, 1])
+    
+    all_processed_bbox_array = np.array(all_processed_bbox)
+    is_right_array = np.array(is_right)
+    frame_buffer = np.array(frame_buffer)
+    repeated_frame_buffer = frame_buffer[np.repeat(np.arange(len(frame_buffer)), 2)]
+    return all_processed_bbox_array, is_right_array, repeated_frame_buffer
+    
+def process_all_vitposes(pred_poses, kps_left_f=None, bbx_left_f=None, kps_right_f=None, bbx_right_f=None):                    
     if len(pred_poses) == 0:
         left_bbox = [0.0] * 4
         right_bbox = [0.0] * 4
@@ -71,17 +119,25 @@ def process_all_vitposes(pred_poses, kps_left_f, bbx_left_f, kps_right_f, bbx_ri
         right_keyp = right_keyps[best_right_index].tolist()
     
     # Writting
-    ujson.dump(left_keyp, kps_left_f)
-    kps_left_f.write('\n')
+    if kps_left_f:
+        ujson.dump(left_keyp, kps_left_f)
+        kps_left_f.write('\n')
 
-    ujson.dump(left_bbox, bbx_left_f)
-    bbx_left_f.write('\n')
+        ujson.dump(left_bbox, bbx_left_f)
+        bbx_left_f.write('\n')
 
-    ujson.dump(right_keyp, kps_right_f)
-    kps_right_f.write('\n')
+        ujson.dump(right_keyp, kps_right_f)
+        kps_right_f.write('\n')
 
-    ujson.dump(right_bbox, bbx_right_f)
-    bbx_right_f.write('\n')
+        ujson.dump(right_bbox, bbx_right_f)
+        bbx_right_f.write('\n')
+    else:
+        return {
+            'left_keyp': left_keyp,
+            'left_bbox': left_bbox,
+            'right_keyp': right_keyp,
+            'right_bbox': right_bbox,
+        }
     
 
 def process_all_yolo_results(results, bboxes_buffer, im_h, im_w, box_score_threshold=0.2, padding=5):
@@ -113,13 +169,21 @@ def main():
     parser.add_argument('--yolo_model', type=str, default='yolov9c.pt', help='YOLO Model for BBX Detection')
     parser.add_argument('--remove_side_cam', type=bool, default=True, help='Remove Side Cameras')
     parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove Bottom Cameras')
+    parser.add_argument('--use_hamer', type=bool, default=False, help='YOLO -> ViTPose -> Hamer pipeline')
     args = parser.parse_args()
 
     # Setup HaMeR model
     device = torch.device('cuda')
     cpm = ViTPoseModel(device)
     model = YOLO(args.yolo_model)
-    
+
+    if args.use_hamer:
+        from hamer.models import load_hamer
+        from hamer.utils import recursive_to
+        hamer_model, hamer_model_cfg = load_hamer(HAMER_CKPT_PATH)
+        hamer_model = hamer_model.to(device)
+        hamer_model.eval()
+
     input_path = os.path.join(args.root_dir, args.seq_path)
 
     if args.use_optim_params:
@@ -162,7 +226,7 @@ def main():
     
     for selected_vid_idx in selected_vid_idxs:
         print(f'Video ID {selected_vid_idx}...')
-
+        
         output_kps_left_path = f'{args.out_dir}/keypoints_2d/left/{selected_vid_idx:03d}'
         output_bbx_left_path = f'{args.out_dir}/bboxes/left/{selected_vid_idx:03d}'
         output_kps_right_path = f'{args.out_dir}/keypoints_2d/right/{selected_vid_idx:03d}'
@@ -204,7 +268,6 @@ def main():
                 for im_name, frame in zip(im_names, orig_imgs):
                     frame_buffer.append(frame)
                     if len(frame_buffer) == args.batch_size:
-                    
                         # Detect humans in image
                         results = model(frame_buffer, verbose=False, stream=True)
                         process_all_yolo_results(results, bboxes_buffer, im_h, im_w, args.box_score_threshold, padding=0)
@@ -215,9 +278,19 @@ def main():
                             bboxes_buffer
                         )
 
-                        for pred_pose in pred_poses:
-                            processed_pose = process_all_vitposes(pred_pose, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f)
-                        
+                        if args.use_hamer:
+                            boxes, right, repeated_frame_buffer = process_all_vitposes_for_hamer(pred_poses, frame_buffer)
+                            hamer_dataset = ViTDetDataset(hamer_model_cfg, repeated_frame_buffer, boxes, right, rescale_factor=2.0)
+                            hamer_dataloader = torch.utils.data.DataLoader(hamer_dataset, batch_size=args.batch_size * 2, shuffle=False, num_workers=0)
+                            for hamer_batch in hamer_dataloader:
+                                hamer_batch = recursive_to(hamer_batch, device)
+                                with torch.no_grad():
+                                    hamer_out = hamer_model(hamer_batch)
+                                prorcess_all_hamerposes(hamer_batch, hamer_out, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f)                            
+                        else:
+                            for pred_pose in pred_poses:
+                                processed_pose = process_all_vitposes(pred_pose, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f)
+                            
                         frame_buffer, bboxes_buffer = [], []
 
                 if len(frame_buffer) > 0:
@@ -230,9 +303,21 @@ def main():
                         frame_buffer,
                         bboxes_buffer
                     )
-                        
-                    for pred_pose in pred_poses:
-                        processed_pose = process_all_vitposes(pred_pose, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f)
+
+                    if args.use_hamer:
+                        start_time = time.time()
+                        boxes, right, repeated_frame_buffer = process_all_vitposes_for_hamer(pred_poses, frame_buffer)
+                        hamer_dataset = ViTDetDataset(hamer_model_cfg, repeated_frame_buffer, boxes, right, rescale_factor=2.0)
+                        hamer_dataloader = torch.utils.data.DataLoader(hamer_dataset, batch_size=args.batch_size * 2, shuffle=False, num_workers=0)
+                        for hamer_batch in hamer_dataloader:
+                            hamer_batch = recursive_to(hamer_batch, device)
+                            with torch.no_grad():
+                                hamer_out = hamer_model(hamer_batch)
+                            prorcess_all_hamerposes(hamer_batch, hamer_out, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f) 
+                                
+                    else:
+                        for pred_pose in pred_poses:
+                            processed_pose = process_all_vitposes(pred_pose, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f)
             time_list.append(time.time() - start_time)            
         
 if __name__ == '__main__':

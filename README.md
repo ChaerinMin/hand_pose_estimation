@@ -15,6 +15,7 @@ pip install -e .[all]
 pip install -v -e third-party/ViTPose
 git clone https://github.com/zju3dv/EasyMocap.git third-party/EasyMocap
 pip install -e third-party/EasyMocap
+pip install -e third-party/hamer
 
 # (apex is recommended for faster inference with 10% performance boost. Installation can take ~1hr.)
 git clone https://github.com/NVIDIA/apex

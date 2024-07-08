@@ -86,7 +86,8 @@ def get_undistort_params(intr, dist, img_size):
     return new_intr
 
 def undistort_image(intr, dist_intr, dist, img):
-    result = cv2.undistort(img, intr, dist, None, dist_intr)
+    # result = cv2.undistort(img, intr, dist, None, dist_intr)
+    result = cv2.undistort(img, intr, dist, None)
     return result
 
 def undistort_points(points, cameras):

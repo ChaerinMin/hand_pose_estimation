@@ -207,11 +207,11 @@ for selected_vid_idx in selected_vid_idxs:
         params_right = smpl_from_keypoints3d2d(body_model_right, keypoints3d_right, all_keypoints2d_right, all_bboxes_right, projs, 
             config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose)
         # params_right = smpl_from_keypoints3d(body_model_right, keypoints3d_right, 
-        #     config=dataset_config, args=args, weight_shape={'s3d': 5000, 'reg_shapes': 5}, weight_pose=weight_pose)
+        #     config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose)
         params_left = smpl_from_keypoints3d2d(body_model_left, keypoints3d_left, all_keypoints2d_left, all_bboxes_left, projs, 
             config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose)
         # params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left, 
-        #     config=dataset_config, args=args, weight_shape={'s3d': 5000, 'reg_shapes': 5}, weight_pose=weight_pose)
+        #     config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose)
 
         if args.to_smooth:
             print('Smoothing Manos...')
@@ -244,7 +244,7 @@ for selected_vid_idx in selected_vid_idxs:
             if args.vis_smpl:
                 if not args.save_frame:
                     os.makedirs(f'{output_path}/mano', exist_ok=True)
-                    outhand_mano_path = f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}_5smooth_1e5_5000_npca_nmshape.mp4'
+                    outhand_mano_path = f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}.mp4'
                 else:
                     outhand_mano_path = f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}'
                     os.makedirs(outhand_mano_path, exist_ok=True)
