@@ -5,6 +5,7 @@ import numpy as np
 from skimage.filters import gaussian
 from yacs.config import CfgNode
 import torch
+import gc
 
 from hamer.datasets.utils import (convert_cvimg_to_tensor,
                     expand_to_aspect_ratio,
@@ -23,6 +24,7 @@ class ViTDetDataset(torch.utils.data.Dataset):
                  right_list: np.array,
                  rescale_factor=2.5,
                  train = False,
+                 device = 'cuda', 
                  **kwargs):
         super().__init__()
         self.cfg = cfg
@@ -38,7 +40,8 @@ class ViTDetDataset(torch.utils.data.Dataset):
         self.scale_list = rescale_factor * (boxes_list[:, 2:4] - boxes_list[:, 0:2]) / 200.0
         self.personid = np.arange(len(boxes_list), dtype=np.int32)
         self.right_list = right_list.astype(np.float32)
-
+        self.device = device
+        
     def __len__(self) -> int:
         return len(self.personid)
 
@@ -85,12 +88,25 @@ class ViTDetDataset(torch.utils.data.Dataset):
             img_patch[n_c, :, :] = (img_patch[n_c, :, :] - self.mean[n_c]) / self.std[n_c]
 
         item = {
-            'img': img_patch,
+            'img': torch.Tensor(img_patch).to(self.device),
             'boxes': boxes,
-            'personid': int(self.personid[idx]),
         }
         item['box_center'] = center
         item['box_size'] = bbox_size
         item['img_size'] = 1.0 * np.array([cvimg.shape[1], cvimg.shape[0]])
         item['right'] = right
         return item
+
+def recursive_clear(x: any):
+    if isinstance(x, dict):
+        for k, v in x.items():
+            recursive_clear(v)
+    elif isinstance(x, torch.Tensor):
+        del x
+        torch.cuda.empty_cache()
+        gc.collect()
+    elif isinstance(x, list):
+        for i in x:
+            recursive_clear(i)
+    else:
+        return x

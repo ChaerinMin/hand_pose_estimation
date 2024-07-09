@@ -25,6 +25,22 @@ pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation -
 ```
 Note: We use apex for its compatibility with mmcv(1.5.0). However, apex.amp is deprecated and should be replaced with torch.amp in future development.
 
+### Note
+There's a bug in the original EasyMocap `EasyMocap/easymocap/pyfitting/optimize_simple.py`. Change the interp_func to this:
+```python
+    def interp_func(params):
+        for start, end in ranges:
+            # 对每个需要插值的区间: 这里直接使用最近帧进行插值了
+            left = start - 1
+            right = end if end == total_frame_num - 1  else end + 1
+            for nf in range(start, end+1):
+                weight = (nf - left)/(right - left)
+                for key in ['Rh', 'Th', 'poses']:
+                    params[key][nf] = interp(params[key][left], params[key][right], 1-weight, key=key)
+        return params
+...
+```
+
 ## Input data structure
 Before 2D/3D/Mano feature extraction, you should have the multi-view video data and camera parameters prepared. 
 

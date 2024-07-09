@@ -21,7 +21,7 @@ from src.utils.cameras import removed_cameras, map_camera_names, get_projections
 import src.utils.params as param_utils
 from src.utils.parser import add_common_args
 from src.vitpose_wrapper import ViTPoseModel
-from src.hamer_wrapper import HAMER_CKPT_PATH, ViTDetDataset
+from src.hamer_wrapper import HAMER_CKPT_PATH, ViTDetDataset, recursive_clear
 
 # ------------------------------ Alpha Pose Helpers ------------------------------ #
 
@@ -53,14 +53,13 @@ def prorcess_all_hamerposes(hamer_batch, hamer_out, kps_left_f, bbx_left_f, kps_
     
     batch_size = hamer_batch['img'].shape[0]
     for n in range(batch_size):
-        is_right = hamer_batch['right'][n].cpu().numpy()
+        is_right = hamer_batch['right'][n]
         pred_keypoints_2d = hamer_out['pred_keypoints_2d'][n, :, :].squeeze()
         multiplier = (2*is_right-1)
         pred_keypoints_2d[:, 0] = pred_keypoints_2d[:, 0] * multiplier
-        joints = pred_keypoints_2d * box_size[n] + box_center[n, :]
-        
-        joints = joints.detach().cpu().numpy()
-        joints = np.hstack((joints, np.ones((21, 1)))).reshape(-1).tolist()
+        joints = pred_keypoints_2d.detach().cpu() * box_size[n] + box_center[n, :]
+
+        joints = np.hstack((joints.numpy(), np.ones((21, 1)))).reshape(-1).tolist()
         
         box = boxes[n, :].tolist()
         if is_right:
@@ -269,23 +268,25 @@ def main():
                     frame_buffer.append(frame)
                     if len(frame_buffer) == args.batch_size:
                         # Detect humans in image
-                        results = model(frame_buffer, verbose=False, stream=True)
+                        with torch.no_grad():
+                            results = model(frame_buffer, verbose=False, stream=True)
                         process_all_yolo_results(results, bboxes_buffer, im_h, im_w, args.box_score_threshold, padding=0)
                         
-                        # Detect human keypoints for each person        
-                        pred_poses = cpm.predict_pose_batch(
-                            frame_buffer,
-                            bboxes_buffer
-                        )
+                        # Detect human keypoints for each person
+                        with torch.no_grad():        
+                            pred_poses = cpm.predict_pose_batch(
+                                frame_buffer,
+                                bboxes_buffer
+                            )
 
                         if args.use_hamer:
                             boxes, right, repeated_frame_buffer = process_all_vitposes_for_hamer(pred_poses, frame_buffer)
-                            hamer_dataset = ViTDetDataset(hamer_model_cfg, repeated_frame_buffer, boxes, right, rescale_factor=2.0)
+                            hamer_dataset = ViTDetDataset(hamer_model_cfg, repeated_frame_buffer, boxes, right, rescale_factor=2.0, device=device)
                             hamer_dataloader = torch.utils.data.DataLoader(hamer_dataset, batch_size=args.batch_size * 2, shuffle=False, num_workers=0)
                             for hamer_batch in hamer_dataloader:
-                                hamer_batch = recursive_to(hamer_batch, device)
                                 with torch.no_grad():
                                     hamer_out = hamer_model(hamer_batch)
+                                    recursive_clear(hamer_batch)
                                 prorcess_all_hamerposes(hamer_batch, hamer_out, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f)                            
                         else:
                             for pred_pose in pred_poses:
@@ -305,14 +306,14 @@ def main():
                     )
 
                     if args.use_hamer:
-                        start_time = time.time()
                         boxes, right, repeated_frame_buffer = process_all_vitposes_for_hamer(pred_poses, frame_buffer)
-                        hamer_dataset = ViTDetDataset(hamer_model_cfg, repeated_frame_buffer, boxes, right, rescale_factor=2.0)
+                        hamer_dataset = ViTDetDataset(hamer_model_cfg, repeated_frame_buffer, boxes, right, rescale_factor=2.0, device=device)
                         hamer_dataloader = torch.utils.data.DataLoader(hamer_dataset, batch_size=args.batch_size * 2, shuffle=False, num_workers=0)
                         for hamer_batch in hamer_dataloader:
-                            hamer_batch = recursive_to(hamer_batch, device)
+                            start_time = time.time()
                             with torch.no_grad():
                                 hamer_out = hamer_model(hamer_batch)
+                                recursive_clear(hamer_batch)
                             prorcess_all_hamerposes(hamer_batch, hamer_out, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f) 
                                 
                     else:

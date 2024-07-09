@@ -204,6 +204,7 @@ for selected_vid_idx in selected_vid_idxs:
             'k3d': 1e2, 'k2d': 2e-3,
             'reg_poses': 1e-3, 'smooth_body': 1e2, 'smooth_poses': 1e2,
         }
+
         params_right = smpl_from_keypoints3d2d(body_model_right, keypoints3d_right, all_keypoints2d_right, all_bboxes_right, projs, 
             config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose)
         # params_right = smpl_from_keypoints3d(body_model_right, keypoints3d_right, 

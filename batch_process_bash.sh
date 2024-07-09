@@ -11,9 +11,9 @@ IDX_END=$3
 ANCHOR_CAMERA="brics-odroid-002_cam0"
 # ANCHOR_CAMERA="brics-odroid-003_cam1"
 
-# echo "########################## EXTRACT 2D KEYPOINTS ################################"
-# python scripts/keypoints_2d_yolo_vitpose.py -r $ROOT_DIR -s $SESSION -o $OUT_DIR --ith $IDX_VIDEO --start $IDX_START --end $IDX_END \
-#         --use_optim_params --anchor_camera $ANCHOR_CAMERA --use_hamer True
+echo "########################## EXTRACT 2D KEYPOINTS ################################"
+python scripts/keypoints_2d_yolo_vitpose.py -r $ROOT_DIR -s $SESSION -o $OUT_DIR --ith $IDX_VIDEO --start $IDX_START --end $IDX_END \
+        --use_optim_params --anchor_camera $ANCHOR_CAMERA --use_hamer True
 
 echo "######################### TRIANGULATE 3D KEYPOINTS #########################"
 python scripts/keypoints_3d_fast.py -r $ROOT_DIR -s $SESSION -o $OUT_DIR --ith $IDX_VIDEO --start $IDX_START --end $IDX_END\
