@@ -207,9 +207,15 @@ def main():
     cam_mapper = map_camera_names(input_path, cam_names)
 
     if args.ith == -1:
-        folder0 = os.listdir(input_path)[0]
-        folder0_path = os.path.join(input_path, folder0)
-        total_video_idxs = len(os.listdir(folder0_path))//2
+        total_video_idxs = 0
+        max_folder_id = 0
+        for fid, folder in enumerate(os.listdir(input_path)):
+            if 'cam' in folder:
+                length = len([file for file in os.listdir(os.path.join(input_path, folder)) if file.endswith('.mp4')])//2
+                if length > total_video_idxs:
+                    total_video_idxs = length
+                    max_folder_id = fid
+                    anchor_camera_by_length = os.listdir(input_path)[fid]
         if args.start > 0:
             if args.end > 0:
                 selected_vid_idxs = list(range(args.start, args.end))
@@ -236,7 +242,7 @@ def main():
         os.makedirs(output_bbx_right_path, exist_ok=True)
 
         # Get files to process
-        reader = Reader(args.input_type, input_path, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=args.anchor_camera if args.anchor_camera else None)
+        reader = Reader(args.input_type, input_path, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith else args.anchor_camera)
         if reader.frame_count <= 0:
             continue
         
