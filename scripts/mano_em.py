@@ -83,9 +83,15 @@ for cam in cams_to_remove:
         cam_names.remove(cam)
 
 if args.ith == -1:
-    folder0 = os.listdir(image_dir)[0]
-    folder0_path = os.path.join(image_dir, folder0)
-    total_video_idxs = len(os.listdir(folder0_path))//2
+    total_video_idxs = 0
+    max_folder_id = 0
+    for fid, folder in enumerate(os.listdir(image_dir)):
+        if 'cam' in folder and folder not in cams_to_remove:
+            length = len([file for file in os.listdir(os.path.join(image_dir, folder)) if file.endswith('.mp4')])
+            if length > total_video_idxs:
+                total_video_idxs = length
+                max_folder_id = fid
+                anchor_camera_by_length = os.listdir(image_dir)[fid]
     if args.start > 0:
         if args.end > 0:
             selected_vid_idxs = list(range(args.start, args.end))
@@ -101,10 +107,10 @@ else:
 
 for selected_vid_idx in selected_vid_idxs:
     print(f'Video ID {selected_vid_idx}...')
-    reader = Reader("video", image_dir, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=args.anchor_camera if args.anchor_camera else None)
+    reader = Reader("video", image_dir, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
     if reader.frame_count <= 0:
         continue
-        
+    
     keypoints2d_dir_right = os.path.join(output_path, "keypoints_2d", "right", str(selected_vid_idx).zfill(3))
     keypoints2d_dir_left = os.path.join(output_path, "keypoints_2d", "left",  str(selected_vid_idx).zfill(3))
     bboxes_dir_right = os.path.join(output_path, "bboxes", "right",  str(selected_vid_idx).zfill(3))

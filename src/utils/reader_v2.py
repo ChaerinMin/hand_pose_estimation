@@ -48,7 +48,9 @@ class Reader():
             self.streams = {}
             self.vids = []
             if anchor_camera:
-                self.vids.append(natsorted(glob(f"{path}/{anchor_camera}/*.mp4"))[self.ith])
+                mp4_list = natsorted(glob(f"{path}/{anchor_camera}/*.mp4"))
+                if len(mp4_list) > self.ith:
+                    self.vids.append(natsorted(glob(f"{path}/{anchor_camera}/*.mp4"))[self.ith])
             else:
                 for cam in os.listdir(path):
                     if 'imu' not in cam and len(glob(f"{path}/{cam}/*.mp4")) > self.ith:
@@ -97,7 +99,7 @@ class Reader():
     def check_timestamp(self):
         
         for cam in os.listdir(self.path):
-            if 'imu' not in cam and cam not in self.cams_to_remove and f"{self.path}/{cam}" not in self.vids[0]:
+            if 'imu' not in cam and cam not in self.cams_to_remove and cam not in self.vids[0]:
                 closest_file, time_diff = find_closest_video(f"{self.path}/{cam}", self.anchor_timestamp)
                 if closest_file:
                     self.vids.append(f"{self.path}/{cam}/{closest_file}")

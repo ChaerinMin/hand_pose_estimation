@@ -66,9 +66,19 @@ for cam in cams_to_remove:
         cam_names.remove(cam)
 
 if args.ith == -1:
-    folder0 = os.listdir(image_base)[0]
-    folder0_path = os.path.join(image_base, folder0)
-    total_video_idxs = len(os.listdir(folder0_path))//2
+    total_video_idxs = 0
+    max_folder_id = 0
+    for fid, folder in enumerate(os.listdir(image_base)):
+        if 'cam' in folder and folder not in cams_to_remove:
+            length = len([file for file in os.listdir(os.path.join(image_base, folder)) if file.endswith('.mp4')])
+            if length > total_video_idxs:
+                total_video_idxs = length
+                max_folder_id = fid
+                anchor_camera_by_length = os.listdir(image_base)[fid]
+    # folder0 = os.listdir(image_base)[0]
+    # folder0_path = os.path.join(image_base, folder0)
+    # total_video_idxs = len(os.listdir(folder0_path))//2
+    # anchor_camera_by_length = "brics-odroid-002_cam0"
     if args.start > 0:
         if args.end > 0:
             selected_vid_idxs = list(range(args.start, args.end))
@@ -91,7 +101,7 @@ for selected_vid_idx in selected_vid_idxs:
     cam_mapper = map_camera_names(keypoints2d_dir_right, cam_names)
 
     # Get files to process
-    reader = Reader(args.input_type, image_base, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=args.anchor_camera if args.anchor_camera else None)
+    reader = Reader(args.input_type, image_base, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
     if reader.frame_count <= 0:
         continue
         

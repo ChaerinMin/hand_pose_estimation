@@ -210,8 +210,8 @@ def main():
         total_video_idxs = 0
         max_folder_id = 0
         for fid, folder in enumerate(os.listdir(input_path)):
-            if 'cam' in folder:
-                length = len([file for file in os.listdir(os.path.join(input_path, folder)) if file.endswith('.mp4')])//2
+            if 'cam' in folder and folder not in cams_to_remove:
+                length = len([file for file in os.listdir(os.path.join(input_path, folder)) if file.endswith('.mp4')])
                 if length > total_video_idxs:
                     total_video_idxs = length
                     max_folder_id = fid
@@ -242,22 +242,28 @@ def main():
         os.makedirs(output_bbx_right_path, exist_ok=True)
 
         # Get files to process
-        reader = Reader(args.input_type, input_path, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith else args.anchor_camera)
+        reader = Reader(args.input_type, input_path, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
         if reader.frame_count <= 0:
             continue
         
         extra_cams_to_remove = reader.to_delete
         cur_cam_names = cam_names.copy()
+
         for cam in extra_cams_to_remove:
             if cam in cur_cam_names:
                 cur_cam_names.remove(cam)
         print("Total Views:", len(cur_cam_names))
-        print("Total frames", reader.frame_count)
+        print("Total frames:", reader.frame_count)
+        
         intrs, projs, dist_intrs, dists, cameras = get_projections(args, params, cur_cam_names, cam_mapper, easymocap_format=True)
+        print("Total cams:", len(intrs), len(dist_intrs), len(dists))
+        print("Reader Length", len(reader.vids))
 
         # Detect 2D Keypoints for all valid views
         time_list = []
-        for v_idx, input_video_path in tqdm(enumerate(reader.vids), total=len(cur_cam_names)):
+        for v_idx, input_video_path in tqdm(enumerate(reader.vids), total=len(reader.vids)):
+            # print(input_video_path)
+            # print(intrs[v_idx], dist_intrs[v_idx], dists[v_idx])
             im_names, orig_imgs, im_h, im_w = frame_preprocess(input_video_path, args.undistort, intrs[v_idx], dist_intrs[v_idx], dists[v_idx])
             
             video_name = input_video_path.split('/')[-1].split('.')[0]
