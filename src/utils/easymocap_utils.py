@@ -97,7 +97,7 @@ def vis_repro(args, images, kpts_repro, nf, config, to_img=True, mode='repro', o
                 bbox = get_bbox_from_pose(keypoints, img)
             else:
                 bbox = det['bbox']
-            plot_bbox(img, bbox, pid=pid, vis_id=vis_id)
+            # plot_bbox(img, bbox, pid=pid, vis_id=vis_id)
             plot_keypoints(img, keypoints, pid=pid, config=config, use_limb_color=True, lw=4)
         images_vis.append(img)
     if len(images_vis) > 1:

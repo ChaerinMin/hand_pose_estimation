@@ -2,7 +2,7 @@ import os
 
 input_folder = '/users/rfu7/ssrinath/datasets/Action/brics-mini'
 output_folder = '/users/rfu7/data/code/24Text2Action/ABATCH'
-start_folder = '2024-09-16-action-mikhail-present'
+start_folder = '2024-10-01-action-clarajin-present'
 
 content = """#!/bin/bash
 

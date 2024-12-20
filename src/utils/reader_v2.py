@@ -53,7 +53,7 @@ class Reader():
                     self.vids.append(natsorted(glob(f"{path}/{anchor_camera}/*.mp4"))[self.ith])
             else:
                 for cam in os.listdir(path):
-                    if 'imu' not in cam and len(glob(f"{path}/{cam}/*.mp4")) > self.ith:
+                    if 'imu' not in cam and 'mic' not in cam and len(glob(f"{path}/{cam}/*.mp4")) > self.ith:
                         if cam not in cams_to_remove:
                             self.vids.append(natsorted(glob(f"{path}/{cam}/*.mp4"))[self.ith])
                     if len(self.vids) > 0:
@@ -99,7 +99,7 @@ class Reader():
     def check_timestamp(self):
         
         for cam in os.listdir(self.path):
-            if 'imu' not in cam and cam not in self.cams_to_remove and cam not in self.vids[0]:
+            if 'imu' not in cam and 'mic' not in cam and cam not in self.cams_to_remove and cam not in self.vids[0]:
                 closest_file, time_diff = find_closest_video(f"{self.path}/{cam}", self.anchor_timestamp)
                 if closest_file:
                     self.vids.append(f"{self.path}/{cam}/{closest_file}")
@@ -117,6 +117,7 @@ class Reader():
     def init_videos(self):
         """ Create video captures for each video
                 ith: the ith video in each folder will be processed."""
+        self.vids = sorted(self.vids)
         for vid in self.vids:
             cap = cv2.VideoCapture(vid)
             frame_count = int(ffmpeg.probe(vid, cmd="ffprobe")["streams"][0]["nb_frames"])

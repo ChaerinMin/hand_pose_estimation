@@ -3,7 +3,7 @@ import os
 
 input_folder = '/users/rfu7/ssrinath/brics/non-pii/brics-mini'
 output_folder = '/users/rfu7/ssrinath/datasets/Action/brics-mini'
-start_folder = '2024-09-16-action-mikhail-present'
+start_folder = '2024-10-01-action-clarajin-present'
 
 started = False
 for folder in os.listdir(input_folder):
