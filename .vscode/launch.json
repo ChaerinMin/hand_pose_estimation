@@ -1,0 +1,21 @@
+{
+    "configurations":[
+        {
+            "name": "Normalize cameras",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "scripts.normalize_cameras",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args":[
+                "-o", "/oscar/data/ssrinath/brics/non-pii/brics-mini/2024-06-20/multisequence000001/calib/stage1/sparse/0",
+                "--ith", "0",
+                "--batch_size", "32512",
+                "--n_steps", "15000",
+                "--align_bounding_box",
+                "--downscale_factor", "0.45",
+                "--optimize_extrinsics",
+            ]
+        }
+    ]
+}

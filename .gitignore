@@ -1,2 +1,5 @@
 testv0/2024-04-16/
 src/utils/__pycache__/
+debug.png
+*.pyc
+*.egg-info
