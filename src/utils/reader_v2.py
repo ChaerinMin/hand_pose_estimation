@@ -33,7 +33,7 @@ class Reader():
     iterator = []
 
     def __init__(
-            self, inp_type: str, path: str, undistort: bool=False, cams_to_remove=[], ith: int=0, start_frame_path=None, anchor_camera=None
+            self, inp_type: str, path: str, undistort: bool=False, cams_to_remove=[], ith: int=0, start_frame_path=None, anchor_camera=None, cam_names=None
         ):
         """ith: the ith video in each folder will be processed."""
         self.type = inp_type
@@ -43,6 +43,7 @@ class Reader():
         self.path = path
         self.cams_to_remove = cams_to_remove
         self.to_delete = []
+        self.cam_names = cam_names
         
         if self.type == "video":
             self.streams = {}
@@ -52,7 +53,7 @@ class Reader():
                 if len(mp4_list) > self.ith:
                     self.vids.append(natsorted(glob(f"{path}/{anchor_camera}/*.mp4"))[self.ith])
             else:
-                for cam in os.listdir(path):
+                for cam in cam_names: #os.listdir(path):
                     if 'imu' not in cam and 'mic' not in cam and len(glob(f"{path}/{cam}/*.mp4")) > self.ith:
                         if cam not in cams_to_remove:
                             self.vids.append(natsorted(glob(f"{path}/{cam}/*.mp4"))[self.ith])
@@ -98,7 +99,9 @@ class Reader():
 
     def check_timestamp(self):
         
-        for cam in os.listdir(self.path):
+        for cam in self.cam_names: #os.listdir(self.path):
+            if "cam" not in cam:
+                continue
             if 'imu' not in cam and 'mic' not in cam and cam not in self.cams_to_remove and cam not in self.vids[0]:
                 closest_file, time_diff = find_closest_video(f"{self.path}/{cam}", self.anchor_timestamp)
                 if closest_file:

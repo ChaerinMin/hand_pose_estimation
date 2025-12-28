@@ -6,7 +6,7 @@ SIDE_CAMERAS = ["brics-odroid-004_cam0", "brics-odroid-005_cam1"] # camera at th
 BOTTOM_SIDE_CAMERAS = [ # camera at the bottom
                   "brics-odroid-003_cam0",
                   "brics-odroid-003_cam1",
-                  "brics-odroid-004_cam0"
+                  "brics-odroid-004_cam0",
                   "brics-odroid-008_cam0",
                   "brics-odroid-008_cam1",
                   "brics-odroid-009_cam0",
@@ -65,6 +65,7 @@ def map_camera_names(base_dir, name_list):
 
     for name in name_list:
         # Find a subdirectory that starts with the name
+        name = name.replace(".", "")
         matched_subdir = next((subdir for subdir in subdirs if subdir.startswith(name)), None)
         
         if matched_subdir:

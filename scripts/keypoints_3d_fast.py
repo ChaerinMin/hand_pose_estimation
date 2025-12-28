@@ -74,7 +74,7 @@ if args.ith == -1:
             if length > total_video_idxs:
                 total_video_idxs = length
                 max_folder_id = fid
-                anchor_camera_by_length = os.listdir(image_base)[fid]
+                anchor_camera_by_length = [p for p in os.listdir(image_base) if 'cam' in p][fid]
     # folder0 = os.listdir(image_base)[0]
     # folder0_path = os.path.join(image_base, folder0)
     # total_video_idxs = len(os.listdir(folder0_path))//2
@@ -101,7 +101,7 @@ for selected_vid_idx in selected_vid_idxs:
     cam_mapper = map_camera_names(keypoints2d_dir_right, cam_names)
 
     # Get files to process
-    reader = Reader(args.input_type, image_base, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
+    reader = Reader(args.input_type, image_base, cam_names=cam_names, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
     if reader.frame_count <= 0:
         continue
         

@@ -52,8 +52,7 @@ output.add_argument('--vis_smpl', action='store_true')
 output.add_argument('--save_frame', action='store_true')
 output.add_argument('--save_mesh', action='store_true')
 args = parser.parse_args()
-
-
+os.system("module load ffmpeg")
 
 # -------------------- Visualization Functions -------------------- #
 
@@ -107,7 +106,7 @@ else:
 
 for selected_vid_idx in selected_vid_idxs:
     print(f'Video ID {selected_vid_idx}...')
-    reader = Reader("video", image_dir, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
+    reader = Reader("video", image_dir, cam_names=cam_names, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
     if reader.frame_count <= 0:
         continue
     

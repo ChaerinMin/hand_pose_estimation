@@ -1,0 +1,85 @@
+{
+    // conda: zeronvs
+    "configurations": [
+        {
+            "name": "Bin to params",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "program": "bin_to_params.py",
+            "justMyCode": false,
+            "args":[
+                "-s", "/oscar/data/ssrinath/brics/non-pii/brics-mini",
+                "-d", "2024-06-20",
+                "-m", "multisequence000001",
+            ]
+        },
+        {
+            "name": "2D keypoint extraction",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "module": "scripts.keypoints_2d_yolo_vitpose",
+            "justMyCode": false,
+            "args":[
+                "-r", "/oscar/data/ssrinath/brics/non-pii/brics-mini",
+                "-s", "2024-06-20",
+                "-o", "/oscar/data/ssrinath/brics/non-pii/brics-mini/2024-06-20/multisequence000001/calib/stage1/sparse/0",
+                "--ith", "0",
+                "--start", "0",
+                "--end", "-1",
+                "--use_hamer", "True",
+                "--anchor_camera", "brics-odroid-002_cam0"
+            ]   
+        },
+        {
+            "name": "3D Triangulation",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "module": "scripts.keypoints_3d_fast",
+            "justMyCode": false,
+            "args":[
+                "-r", "/oscar/data/ssrinath/brics/non-pii/brics-mini",
+                "-s", "2024-06-20",
+                "-o", "/oscar/data/ssrinath/brics/non-pii/brics-mini/2024-06-20/multisequence000001/calib/stage1/sparse/0",
+                "--ith", "0",
+                "--start", "0",
+                "--end", "-1",
+                "--anchor_camera", "brics-odroid-002_cam0",
+                "--undistort",
+                "--all_frames",
+                "--easymocap",
+                "--to_smooth",
+            ]   
+        },
+        {
+            "name": "Mano fit",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "module": "scripts.mano_em",
+            "justMyCode": false,
+            "args":[
+                "-r", "/oscar/data/ssrinath/brics/non-pii/brics-mini",
+                "-s", "2024-06-20",
+                "-o", "/oscar/data/ssrinath/brics/non-pii/brics-mini/2024-06-20/multisequence000001/calib/stage1/sparse/0",
+                "--model", "manor",
+                "--body", "handr",
+                "--undistort",
+                "--ith", "0",
+                "--start", "0",
+                "--end", "-1",
+                "--use_filtered",
+                "--stride", "1",
+                "--to_smooth",
+                "--anchor_camera", "brics-odroid-002_cam0",
+                "--vis_smpl",
+                "--vis_2d_repro",
+                "--vis_3d_repro",
+                "--save_mesh",
+                "--save_frame"
+            ]   
+        }
+    ]
+}

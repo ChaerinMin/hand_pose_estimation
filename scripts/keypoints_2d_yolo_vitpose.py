@@ -170,6 +170,7 @@ def main():
     parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove Bottom Cameras')
     parser.add_argument('--use_hamer', type=bool, default=False, help='YOLO -> ViTPose -> Hamer pipeline')
     args = parser.parse_args()
+    os.system("module load ffmpeg")
 
     # Setup HaMeR model
     device = torch.device('cuda')
@@ -193,6 +194,7 @@ def main():
     params_path = os.path.join(args.out_dir, params_txt)
     params = param_utils.read_params(params_path)
     cam_names = list(params[:]["cam_name"])
+    cam_names = [c.replace(".", "") for c in cam_names]
     removed_camera_path = os.path.join(args.out_dir, 'ignore_camera.txt')
     if os.path.isfile(removed_camera_path):
         with open(removed_camera_path) as file:
@@ -242,7 +244,7 @@ def main():
         os.makedirs(output_bbx_right_path, exist_ok=True)
 
         # Get files to process
-        reader = Reader(args.input_type, input_path, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
+        reader = Reader(args.input_type, input_path, cam_names=cam_names, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
         if reader.frame_count <= 0:
             continue
         
