@@ -24,7 +24,7 @@ from src.vitpose_wrapper import ViTPoseModel
 from src.hamer_wrapper import HAMER_CKPT_PATH, ViTDetDataset, recursive_clear
 
 # ------------------------------ Alpha Pose Helpers ------------------------------ #
-
+os.system("module load ffmpeg")
 
 def process_hand_keypoints_batch(keypoints, validity_threshold, min_valid_keypoints):
     valid_mask = keypoints[:, :, 2] > validity_threshold

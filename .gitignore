@@ -3,3 +3,12 @@ yolov9c.pt
 build/
 pose_estimation.egg-info/
 *__pycache__*
+testv0/bboxes/
+testv0/keypoints_2d/
+testv0/keypoints_3d/
+testv0/mano
+testv0/meshes
+testv0/params
+testv0/repro_2d
+testv0/repro_3d
+ignore_camera.txt

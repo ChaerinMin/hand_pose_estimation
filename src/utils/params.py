@@ -82,19 +82,23 @@ def read_params(params_path):
     return params
 
 def get_undistort_params(intr, dist, img_size):
-    new_intr = cv2.getOptimalNewCameraMatrix(intr, dist, img_size, alpha=1)
+    new_intr, _ = cv2.getOptimalNewCameraMatrix(intr, dist, img_size, 0, img_size)
     return new_intr
 
 def undistort_image(intr, dist_intr, dist, img):
-    # result = cv2.undistort(img, intr, dist, None, dist_intr)
-    result = cv2.undistort(img, intr, dist, None)
+    result = cv2.undistort(img, intr, dist, None, dist_intr)
+    # result = cv2.undistort(img, intr, dist, None)
     return result
 
-def undistort_points(points, cameras):
+def undistort_points(points, intrs, dists, dist_intrs):
     nViews = len(points)
     pelvis_undis = []
     for nv in range(nViews):
-        camera = {key:cameras[key][nv] for key in ['K', 'dist']}
+        # camera = {key:cameras[key][nv] for key in ['K', 'dist']}
+        camera = {
+            "K": np.asarray(intrs)[nv],
+            "dist": np.asarray(dists)[nv],
+        }
         if points[nv].shape[0] > 0:
             keypoints = points[nv]
             K = camera['K']
@@ -102,7 +106,7 @@ def undistort_points(points, cameras):
             assert len(keypoints.shape) == 2, keypoints.shape
             kpts = keypoints[:, None, :2]
             kpts = np.ascontiguousarray(kpts)
-            kpts = cv2.undistortPoints(kpts, K, dist, P=K)
+            kpts = cv2.undistortPoints(kpts, K, dist, P=dist_intrs[nv])
             pelvis = np.hstack([kpts[:, 0], keypoints[:, 2:]])
         else:
             pelvis = points[nv].copy()

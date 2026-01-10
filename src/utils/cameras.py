@@ -88,22 +88,30 @@ def get_projections(args, params, cam_names, cam_mapper, easymocap_format=False)
             intr, dist = param_utils.get_intr(param)
             r, t = param_utils.get_rot_trans(param)
 
+            h = param['height']
+            w = param['width']
+
             rot.append(r)
             trans.append(t)
-
             intrs.append(intr.copy())
-            
-            dist_intrs.append(intr.copy())
-
-            projs.append(intr @ extr)
             dists.append(dist)
+            
+            if args.undistort:
+                new_intr = param_utils.get_undistort_params(intr, dist, (w, h))
+                dist_intrs.append(new_intr.copy())
+                projs.append(new_intr @ extr)
+            else:
+                dist_intrs.append(intr.copy())
+                projs.append(intr @ extr)
+
     if easymocap_format:
         # Easy Mocap for 3D keypoints
+        zero_dists = np.zeros_like(np.asarray(dists))
         cameras = { 
-            'K': np.asarray(intrs),
+            'K': np.asarray(dist_intrs if args.undistort else intrs),
             'R': np.asarray(rot), 
             'T': np.asarray(trans),
-            'dist': np.asarray(dists),
+            'dist': zero_dists if args.undistort else np.asarray(dists),
             'P': np.asarray(projs) }
     elif args.undistort:
         cameras = { 'K': np.asarray(dist_intrs),
