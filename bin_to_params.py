@@ -19,7 +19,7 @@ def main(args):
         args.day,
         args.multisequence,
         "calib",
-        "stage1",  # stage 1: before undistort. stage 2: assume already undistorted
+        f"stage{args.stage}",
         "sparse",
         "0"
     )
@@ -62,14 +62,22 @@ def main(args):
             param.append(int(data[3]))
             param += [float(datum) for datum in data[4:]]
             cam_params.append(tuple(param))
-    cameras = np.array(cam_params, dtype=[
-        ('cam_id', int),
-        ('width', int), ('height', int),
-        ('fx', float), ('fy', float),
-        ('cx', float), ('cy', float),
-        ('k1', float), ('k2', float),
-        ('p1', float), ('p2', float),
-    ])
+    if args.stage == 1:
+        cameras = np.array(cam_params, dtype=[
+            ('cam_id', int),
+            ('width', int), ('height', int),
+            ('fx', float), ('fy', float),
+            ('cx', float), ('cy', float),
+            ('k1', float), ('k2', float),
+            ('p1', float), ('p2', float),
+        ])
+    else:
+        cameras = np.array(cam_params, dtype=[
+            ('cam_id', int),
+            ('width', int), ('height', int),
+            ('fx', float), ('fy', float),
+            ('cx', float), ('cy', float),
+        ])
 
     # img_cams = rf.join_by('cam_id', cameras, images)
     df_cameras = pd.DataFrame(cameras)
@@ -94,6 +102,13 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--day", type=str, required=True, help="yyyy-mm-dd")
     parser.add_argument(
         "-m", "--multisequence", type=str, required=True, help="multisequence0000001"
+    )
+    parser.add_argument(
+        "--stage",
+        type=int,
+        choices=[1, 2],
+        default=2,
+        help="1 is before undistort. 2 assumes already undistorted"
     )
     cli_args = parser.parse_args()
 

@@ -12,6 +12,22 @@
                 "-s", "/oscar/data/ssrinath/brics/non-pii/brics-mini",
                 "-d", "2024-06-20",
                 "-m", "multisequence000001",
+                "--stage", "2"
+            ]
+        },
+        {
+            "name": "Params to bin",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "program": "params_to_bin.py",
+            "justMyCode": false,
+            "args":[
+                "-s", "/oscar/data/ssrinath/brics/non-pii/brics-mini",
+                "-d", "2024-06-20",
+                "-m", "multisequence000001",
+                "--params_fname", "params",
+                "--stage", "1"
             ]
         },
         {
