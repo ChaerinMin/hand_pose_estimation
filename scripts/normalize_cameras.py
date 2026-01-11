@@ -99,7 +99,10 @@ def main():
     with open(args.cam_faces_path, "r") as f:
         faces = json.load(f)
 
-    params_orig = param_utils.read_params(params_path)
+    if "stage2" in args.out_dir:
+        params_orig = param_utils.read_params(params_path, distortion=False)
+    else:
+        params_orig = param_utils.read_params(params_path, distortion=True)
     params = deepcopy(params_orig)
     cam2idx = {}
     pos = []
@@ -131,6 +134,7 @@ def main():
         axs = np.zeros((3, 3))
 
         # Rotate to align bounding box
+        find_axes = True
         for idx, dir_ in enumerate(
             [
                 ["1 0 0", "-1 0 0"],
@@ -151,16 +155,23 @@ def main():
                     avg2.append(pos[cam2idx[camera]])
                 except:
                     pass
+            
+            if not avg1 or not avg2:
+                find_axes = False
+                break
 
             axs[idx] = np.asarray(avg1).mean(axis=0) - np.asarray(avg2).mean(axis=0)
             axs[idx] /= np.linalg.norm(axs[idx])
 
         # Get closest orthormal basis
-        u, _, v = np.linalg.svd(axs)
-        orth_axs = u @ v
-
-        new_pos = (orth_axs @ pos.T).T
-        new_rot = orth_axs @ rot
+        if find_axes:
+            u, _, v = np.linalg.svd(axs)
+            orth_axs = u @ v
+            new_pos = (orth_axs @ pos.T).T
+            new_rot = orth_axs @ rot
+        else:
+            new_pos = pos
+            new_rot = rot
 
         # Scale to fit diagonal in unity cube
         scale_factor = np.sqrt(2) / max_dist * args.camera_scale

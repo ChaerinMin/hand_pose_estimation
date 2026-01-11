@@ -32,7 +32,10 @@ def get_intr(param, undistort=False):
     intr[1, 2] = param["cy_undist" if undistort else "cy"]
 
     # TODO: Make work for arbitrary dist params in opencv
-    dist = np.asarray([param["k1"], param["k2"], param["p1"], param["p2"]])
+    if "k1" in param:
+        dist = np.asarray([param["k1"], param["k2"], param["p1"], param["p2"]])
+    else:
+        dist = None
 
     return intr, dist
 
@@ -53,32 +56,55 @@ def get_extr(param):
     return extr
 
 
-def read_params(params_path):
-    params = np.loadtxt(
-        params_path,
-        dtype=[
-            ("cam_id", int),
-            ("width", int),
-            ("height", int),
-            ("fx", float),
-            ("fy", float),
-            ("cx", float),
-            ("cy", float),
-            ("k1", float),
-            ("k2", float),
-            ("p1", float),
-            ("p2", float),
-            ("cam_name", "<U22"),
-            ("qvecw", float),
-            ("qvecx", float),
-            ("qvecy", float),
-            ("qvecz", float),
-            ("tvecx", float),
-            ("tvecy", float),
-            ("tvecz", float),
-        ]
-    )
-    params = np.sort(params, order="cam_name")
+def read_params(params_path, distortion):
+    if distortion:
+        params = np.loadtxt(
+            params_path,
+            dtype=[
+                ("cam_id", int),
+                ("width", int),
+                ("height", int),
+                ("fx", float),
+                ("fy", float),
+                ("cx", float),
+                ("cy", float),
+                ("k1", float),
+                ("k2", float),
+                ("p1", float),
+                ("p2", float),
+                ("cam_name", "<U22"),
+                ("qvecw", float),
+                ("qvecx", float),
+                ("qvecy", float),
+                ("qvecz", float),
+                ("tvecx", float),
+                ("tvecy", float),
+                ("tvecz", float),
+            ]
+        )
+        params = np.sort(params, order="cam_name")
+    else:
+        params = np.loadtxt(
+            params_path,
+            dtype=[
+                ("cam_id", int),
+                ("width", int),
+                ("height", int),
+                ("fx", float),
+                ("fy", float),
+                ("cx", float),
+                ("cy", float),
+                ("cam_name", "<U22"),
+                ("qvecw", float),
+                ("qvecx", float),
+                ("qvecy", float),
+                ("qvecz", float),
+                ("tvecx", float),
+                ("tvecy", float),
+                ("tvecz", float),
+            ]
+        )
+        params = np.sort(params, order="cam_name")
 
     return params
 
