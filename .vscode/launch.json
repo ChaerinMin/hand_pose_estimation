@@ -8,7 +8,8 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "args":[
-                "-o", "/oscar/data/ssrinath/brics/non-pii/brics-mini/2024-06-20/multisequence000001/calib/stage1/sparse/0",
+                // "-o", "/oscar/data/ssrinath/brics/non-pii/brics-mini/2024-06-20/multisequence000001/calib/stage1/sparse/0",
+                "-o", "/dev/hdd/BRICS/2024-06-20/multisequence000001/calib/stage2/sparse/0",
                 "--ith", "0",
                 "--batch_size", "32512",
                 "--n_steps", "15000",
