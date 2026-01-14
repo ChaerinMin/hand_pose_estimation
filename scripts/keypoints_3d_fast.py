@@ -52,7 +52,12 @@ else:
 
 params_path = os.path.join(output_path, params_txt)
 
-params = param_utils.read_params(params_path)
+if "stage1" in args.out_dir:
+    params = param_utils.read_params(params_path, distortion=True)
+elif "stage2" in args.out_dir:
+    params = param_utils.read_params(params_path, distortion=False)
+else:
+    raise ValueError("Cannot determine whether to assume undistorted.")
 cam_names = list(params[:]["cam_name"])
 removed_camera_path = os.path.join(output_path, 'ignore_camera.txt')
 if os.path.isfile(removed_camera_path):
@@ -142,9 +147,27 @@ for selected_vid_idx in selected_vid_idxs:
                         keypoints2d_right.append(np.array(ujson.loads(liner)).reshape(-1, 3))
             keypoints2d_left = np.asarray(keypoints2d_left)
             keypoints2d_right = np.asarray(keypoints2d_right)
+            valid_left = np.logical_not(
+                np.logical_and(
+                    np.logical_and(
+                        (keypoints2d_left[:, :, 0] == 0).all(axis=1),
+                        (keypoints2d_left[:, :, 1] == 0).all(axis=1)),
+                    (keypoints2d_left[:, :, 2] == 1).all(axis=1)
+                )
+            )
+            valid_right = np.logical_not(
+                np.logical_and(
+                    np.logical_and(
+                        (keypoints2d_right[:, :, 0] == 0).all(axis=1),
+                        (keypoints2d_right[:, :, 1] == 0).all(axis=1)),
+                    (keypoints2d_right[:, :, 2] == 1).all(axis=1)
+                )
+            )
             if args.to_smooth:
-                keypoints2d_left[:2] = apply_one_euro_filter_3d(keypoints2d_left[:2], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
-                keypoints2d_right[:2] = apply_one_euro_filter_3d(keypoints2d_right[:2], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+                if keypoints2d_left[:2][valid_left[:2]].shape[0] > 1:
+                    keypoints2d_left[:2][valid_left[:2]] = apply_one_euro_filter_3d(keypoints2d_left[:2][valid_left[:2]], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+                if keypoints2d_right[:2][valid_right[:2]].shape[0] > 1:
+                    keypoints2d_right[:2][valid_right[:2]] = apply_one_euro_filter_3d(keypoints2d_right[:2][valid_right[:2]], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
             all_keypoints2d_left.append(keypoints2d_left)
             all_keypoints2d_right.append(keypoints2d_right)
     all_keypoints2d_left = np.asarray(all_keypoints2d_left)
@@ -162,15 +185,37 @@ for selected_vid_idx in selected_vid_idxs:
             if l_idx in chosen_frames:
                 keypoints2d_left = all_keypoints2d_left[:, l_idx, :, :]
                 keypoints2d_right = all_keypoints2d_right[:, l_idx, :, :]
+                valid_left = np.logical_not(
+                    np.logical_and(
+                        np.logical_and(
+                            (keypoints2d_left[:, :, 0] == 0).all(axis=1),
+                            (keypoints2d_left[:, :, 1] == 0).all(axis=1)),
+                        (keypoints2d_left[:, :, 2] == 1).all(axis=1)
+                    )
+                )
+                valid_right = np.logical_not(
+                    np.logical_and(
+                        np.logical_and(
+                            (keypoints2d_right[:, :, 0] == 0).all(axis=1),
+                            (keypoints2d_right[:, :, 1] == 0).all(axis=1)),
+                        (keypoints2d_right[:, :, 2] == 1).all(axis=1)
+                    )
+                )
                 if not args.easymocap:
-                    keypoints3d_left, residuals = triangulate_joints(np.asarray(keypoints2d_left), np.asarray(projs), processor=ransac_processor, residual_threshold=10, min_samples=5)
+                    keypoints3d_left, residuals = triangulate_joints(np.asarray(keypoints2d_left)[valid_left], np.asarray(projs)[valid_left], processor=ransac_processor, residual_threshold=10, min_samples=5)
                     print(f"Error: {residuals.mean()}")
-                    keypoints3d_right, residuals = triangulate_joints(np.asarray(keypoints2d_right), np.asarray(projs), processor=ransac_processor, residual_threshold=10, min_samples=5)
+                    keypoints3d_right, residuals = triangulate_joints(np.asarray(keypoints2d_right)[valid_right], np.asarray(projs)[valid_right], processor=ransac_processor, residual_threshold=10, min_samples=5)
                     print(f"Error: {residuals.mean()}")
                 else:
                     triangulation = SimpleTriangulate("iterative")
-                    keypoints3d_left = triangulation(np.asarray(keypoints2d_left), cameras)['keypoints3d']
-                    keypoints3d_right = triangulation(np.asarray(keypoints2d_right), cameras)['keypoints3d']
+                    valid_cameras = {}
+                    for k_cam in cameras:
+                        valid_cameras[k_cam] = cameras[k_cam][valid_left]
+                    keypoints3d_left = triangulation(np.asarray(keypoints2d_left)[valid_left], valid_cameras)['keypoints3d']
+                    valid_cameras = {}
+                    for k_cam in cameras:
+                        valid_cameras[k_cam] = cameras[k_cam][valid_right]
+                    keypoints3d_right = triangulation(np.asarray(keypoints2d_right)[valid_right], valid_cameras)['keypoints3d']
                 ujson.dump(keypoints3d_left.tolist(), fl)
                 fl.write('\n')
                 ujson.dump(keypoints3d_right.tolist(), fr)

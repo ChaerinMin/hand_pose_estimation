@@ -55,7 +55,7 @@ def vis_smpl(args, vertices, faces, images, nf, cameras, mode='smpl', extra_data
         cv2.imwrite(outname, image_vis)
     # else:
     #     out_dir.write(image_vis)
-    return image_vis
+    return image_vis, render_results
 
 
 # project 3d keypoints from easymocap/mytools/reconstruction.py

@@ -96,7 +96,7 @@ def get_projections(args, params, cam_names, cam_mapper, easymocap_format=False)
             intrs.append(intr.copy())
             dists.append(dist)
             
-            if args.undistort:
+            if args.undistort and not (dist == 0).all():
                 new_intr = param_utils.get_undistort_params(intr, dist, (w, h))
                 dist_intrs.append(new_intr.copy())
                 projs.append(new_intr @ extr)

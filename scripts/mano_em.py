@@ -1,4 +1,5 @@
 import argparse
+import glob
 import json
 import os
 import sys
@@ -30,6 +31,45 @@ os.environ['PYOPENGL_PLATFORM'] = 'egl'
 os.system("module load ffmpeg")
 sys.path.append(".")
 sys.path.append("./third-party/EasyMocap")
+
+
+def estimate_scale_from_keypoints(body_model, kp3ds, kintree=None, eps=1e-8):
+    # model
+    kintree = np.array(kintree, dtype=int)
+    src_idx = kintree[:, 0].astype(int)
+    dst_idx = kintree[:, 1].astype(int)
+
+    # scale of our keypoints
+    vecs_obs = kp3ds[:, dst_idx, :3] - kp3ds[:, src_idx, :3]
+    L_obs = np.linalg.norm(vecs_obs, axis=2)
+
+    # scale of the model
+    params0 = body_model.init_params(nFrames=1)
+    kpts_model = body_model(return_verts=False, return_tensor=False, only_shape=True, **params0)[0]
+    vecs_model = kpts_model[dst_idx, :3] - kpts_model[src_idx, :3]
+    L_model = np.linalg.norm(vecs_model, axis=1)
+
+    # ratio
+    ratios = []
+    nLimbs = L_model.shape[0]
+    for ts in range(kp3ds.shape[0]):
+        for li in range(nLimbs):
+            if L_obs[ts, li] > eps and L_model[li] > eps:
+                ratios.append(L_model[li] / (L_obs[ts, li] + eps))
+    ratios = np.array(ratios)
+    assert ratios.size > 0, " No valid limb ratios computed"
+    s = float(np.median(ratios))
+    assert np.isfinite(s) and s > 0, f'Invalid scale estimated: {s}'
+    return s
+
+
+def apply_scale_to_keypoints(kp3ds, s):
+    coords = kp3ds[:, :, :3]
+    centers = coords[:, 0:1, :]
+    scaled = (coords - centers) * float(s) + centers
+    out = np.concatenate([scaled, kp3ds[..., 3:4]], axis=2)
+    return out
+
 
 
 parser = argparse.ArgumentParser("Mano Fitting Argument Parser")
@@ -76,7 +116,14 @@ output_path = args.out_dir
 params_path = os.path.join(output_path, params_txt)
 
 # filter out some cameras
-params = param_utils.read_params(params_path)
+if "stage1" in args.out_dir:
+    params = param_utils.read_params(params_path, distortion=True)
+    use_parsed = False
+elif "stage2" in args.out_dir:
+    params = param_utils.read_params(params_path, distortion=False)
+    use_parsed = True
+else:
+    raise ValueError("Cannot determine whether to assume undistorted.")
 cam_names = list(params[:]["cam_name"])
 removed_camera_path = os.path.join(output_path, 'ignore_camera.txt')
 if os.path.isfile(removed_camera_path):
@@ -140,8 +187,8 @@ for selected_vid_idx in selected_vid_idxs:
 
     # fileter out some frames
     if args.use_filtered:
-        chosen_path_left = os.path.join(keypoints3d_dir, f"chosen_frames_left.json")
-        chosen_path_right = os.path.join(keypoints3d_dir, f"chosen_frames_right.json")
+        chosen_path_left = os.path.join(keypoints3d_dir, "chosen_frames_left.json")
+        chosen_path_right = os.path.join(keypoints3d_dir, "chosen_frames_right.json")
         with open(chosen_path_right, "r") as f:
             chosen_frames_right = set(json.load(f))
         with open(chosen_path_left, "r") as f:
@@ -249,20 +296,27 @@ for selected_vid_idx in selected_vid_idxs:
             'k3d': 1e2, 'k2d': 2e-3,
             'reg_poses': 1e-3, 'smooth_body': 1e2, 'smooth_poses': 1e2,
         }
+        # Estimate global scale for observed keypoints -> model units and create scaled copies
+        s_right = estimate_scale_from_keypoints(body_model_right, keypoints3d_right, kintree=dataset_config.get('kintree', None))
+        s_left = estimate_scale_from_keypoints(body_model_left, keypoints3d_left, kintree=dataset_config.get('kintree', None))
+        keypoints3d_right_scaled = apply_scale_to_keypoints(keypoints3d_right, s_right)
+        keypoints3d_left_scaled = apply_scale_to_keypoints(keypoints3d_left, s_left)
+        final_scale_right = 1.0 / s_right
+        final_scale_left = 1.0 / s_left
         fit_3d2d = False
         if fit_3d2d:
             params_right = smpl_from_keypoints3d2d(
-                body_model_right, keypoints3d_right, all_keypoints2d_right, all_bboxes_right, projs, 
+                body_model_right, keypoints3d_right_scaled, all_keypoints2d_right, all_bboxes_right, projs, 
                 config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose
             )
             params_left = smpl_from_keypoints3d2d(
-                body_model_left, keypoints3d_left, all_keypoints2d_left, all_bboxes_left, projs, 
+                body_model_left, keypoints3d_left_scaled, all_keypoints2d_left, all_bboxes_left, projs, 
                 config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose
             )
         else:
-            params_right = smpl_from_keypoints3d(body_model_right, keypoints3d_right, 
+            params_right = smpl_from_keypoints3d(body_model_right, keypoints3d_right_scaled, 
                 config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose)
-            params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left, 
+            params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left_scaled, 
                 config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose)
 
         # smooth mano parameters
@@ -313,6 +367,12 @@ for selected_vid_idx in selected_vid_idxs:
                 else:
                     outhand_3d_path = f'{output_path}/repro_3d/{str(selected_vid_idx).zfill(3)}'
                     os.makedirs(outhand_3d_path, exist_ok=True)
+            if not args.save_frame:
+                os.makedirs(f'{output_path}/regress_joints', exist_ok=True)
+                outjoint_3d_path = f'{output_path}/regress_joints/{str(selected_vid_idx).zfill(3)}.mp4'
+            else:
+                outjoint_3d_path = f'{output_path}/regress_joints/{str(selected_vid_idx).zfill(3)}'
+                os.makedirs(outjoint_3d_path, exist_ok=True)
 
             # scale
             # nf = 0
@@ -333,16 +393,34 @@ for selected_vid_idx in selected_vid_idxs:
             #     nf += 1
                     
             nf = 0
-            for abs_idx, (frames, idx) in tqdm(enumerate(reader(chosen_frames)), total=len(chosen_frames)):
+            if not use_parsed:
+                generator = reader(chosen_frames)
+            for abs_idx, chosen_f in tqdm(enumerate(chosen_frames)):
+                if use_parsed:
+                    multiseq_dir = args.out_dir[:args.out_dir.index("calib")]
+                    parsed_dir = os.path.join(multiseq_dir, "parsed")
+                    timestamp_dir = os.path.join(parsed_dir, f"timestamp_{chosen_f}", "images")
+                    frames = {}
+                    for cam in cur_cam_names:
+                        if cam in cam_mapper:
+                            frame_path = os.path.join(timestamp_dir, f"{cam}.jpg")
+                            if os.path.exists(frame_path):
+                                image_s2 = cv2.imread(frame_path)    
+                            else:
+                                image_s2 = np.ones((params["height"][0], params["width"][0], 3), dtype=np.uint8) * 255
+                            frames[cam_mapper[cam]] = image_s2
+                else:
+                    (frames, idx) = next(generator)
+                
                 # undistort images for visualization
                 images = []
                 c_idx = 0
                 for cam in cur_cam_names:
                     if cam in cam_mapper:
                         image = frames[cam_mapper[cam]]
-                        if args.undistort:
+                        if args.undistort and not (dists[c_idx] == 0).all():
                             image = param_utils.undistort_image(intrs[c_idx], dist_intrs[c_idx], dists[c_idx], image)
-                            c_idx += 1
+                        c_idx += 1
                         images.append(image)
 
                 param_right = select_nf(params_right, nf)
@@ -356,14 +434,16 @@ for selected_vid_idx in selected_vid_idxs:
                         # scaling
                         # root_right = param_right['Th'].reshape(3)
                         # root_left = param_left['Th'].reshape(3)
-                        # vertices_right_scaled = (vertices_right[0] - root_right) * final_scale_right + root_right
-                        # vertices_left_scaled = (vertices_left[0] - root_left) * final_scale_left + root_left
-                        vertices_right_scaled = vertices_right[0]
-                        vertices_left_scaled = vertices_left[0]
+                        root_right = keypoints3d_right[abs_idx][0, :3]
+                        root_left = keypoints3d_left[abs_idx][0, :3]
+                        vertices_right_scaled = (vertices_right[0] - root_right) * final_scale_right + root_right
+                        vertices_left_scaled = (vertices_left[0] - root_left) * final_scale_left + root_left
+                        # vertices_right_scaled = vertices_right[0]
+                        # vertices_left_scaled = vertices_left[0]
                         # project the mesh to image
                         vertices = np.concatenate((vertices_left_scaled, vertices_right_scaled), axis=0)
                         faces = np.concatenate((body_model_left.faces, body_model_right.faces+vertices_left_scaled.shape[0]), axis=0)
-                        image_vis = vis_smpl(
+                        image_vis, render_results = vis_smpl(
                             args, vertices=vertices, faces=faces, images=images, 
                             nf=nf, cameras=cameras, add_back=True, out_dir=outhand_mano_path
                         )
@@ -373,8 +453,8 @@ for selected_vid_idx in selected_vid_idxs:
 
                     # save the mesh as obj
                     if args.save_mesh:
-                        vertices = np.concatenate((vertices_left[0], vertices_right[0]), axis=0)
-                        faces = np.concatenate((body_model_left.faces, body_model_right.faces+vertices_left[0].shape[0]), axis=0)
+                        vertices = np.concatenate((vertices_left_scaled, vertices_right_scaled), axis=0)
+                        faces = np.concatenate((body_model_left.faces, body_model_right.faces+vertices_left_scaled.shape[0]), axis=0)
                         mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
                         outdir = os.path.join(output_path, f'meshes/{str(selected_vid_idx).zfill(3)}')
                         os.makedirs(outdir, exist_ok=True)
@@ -392,6 +472,20 @@ for selected_vid_idx in selected_vid_idxs:
                         if abs_idx == 0:
                             outhand_3d = create_video_writer(outhand_3d_path, (image_vis.shape[1], image_vis.shape[0]), fps=30)
                         outhand_3d.write(image_vis)
+
+                    vis_regressed_joints = True
+                    if vis_regressed_joints:
+                        joints_right = body_model_right(return_verts=False, return_tensor=False, **param_right)
+                        joints_left = body_model_left(return_verts=False, return_tensor=False, **param_left)
+                        joints_right = (joints_right[0] - root_right) * final_scale_right + root_right
+                        joints_left = (joints_left[0] - root_left) * final_scale_left + root_left
+                        joints = np.concatenate((joints_left, joints_right), axis=0)
+                        joints_repro = projectN3(joints, projs)
+                        joints_repro[:, :, 2] = 0.5
+                        image_vis = vis_repro(args, render_results, joints_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outjoint_3d_path)
+                        if abs_idx == 0:
+                            outjoint_3d = create_video_writer(outjoint_3d_path, (image_vis.shape[1], image_vis.shape[0]), fps=30)
+                        outjoint_3d.write(image_vis)
 
                     # overlay the 2D keypoints to image
                     if args.vis_2d_repro:

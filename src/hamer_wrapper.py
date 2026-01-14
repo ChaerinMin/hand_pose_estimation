@@ -6,6 +6,7 @@ from skimage.filters import gaussian
 from yacs.config import CfgNode
 import torch
 import gc
+import os
 
 from hamer.datasets.utils import (convert_cvimg_to_tensor,
                     expand_to_aspect_ratio,
@@ -13,7 +14,10 @@ from hamer.datasets.utils import (convert_cvimg_to_tensor,
 
 DEFAULT_MEAN = 255. * np.array([0.485, 0.456, 0.406])
 DEFAULT_STD = 255. * np.array([0.229, 0.224, 0.225])
-HAMER_CKPT_PATH = '/gpfs/data/ssrinath/projects/brics-pose/hamer_ckpts/checkpoints/hamer.ckpt'
+if os.path.exists("/gpfs/data/ssrinath/projects/brics-pose"):
+    HAMER_CKPT_PATH = '/gpfs/data/ssrinath/projects/brics-pose/hamer_ckpts/checkpoints/hamer.ckpt'
+else:
+    HAMER_CKPT_PATH = '_DATA/hamer_ckpts/checkpoints/hamer.ckpt'
 
 class ViTDetDataset(torch.utils.data.Dataset):
 

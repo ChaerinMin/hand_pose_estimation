@@ -46,7 +46,7 @@ def process_hand_keypoints_batch(keypoints, validity_threshold, min_valid_keypoi
         
     return bboxes, reshaped_keypoints, valid_counts
 
-def prorcess_all_hamerposes(hamer_batch, hamer_out, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f):
+def prorcess_all_hamerposes(noframe_buffer, hamer_batch, hamer_out, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f):
     boxes = hamer_batch['boxes']
     box_center = hamer_batch["box_center"].float()
     box_size = hamer_batch["box_size"].float()
@@ -54,24 +54,26 @@ def prorcess_all_hamerposes(hamer_batch, hamer_out, kps_left_f, bbx_left_f, kps_
     batch_size = hamer_batch['img'].shape[0]
     for n in range(batch_size):
         is_right = hamer_batch['right'][n]
-        pred_keypoints_2d = hamer_out['pred_keypoints_2d'][n, :, :].squeeze()
-        multiplier = (2*is_right-1)
-        pred_keypoints_2d[:, 0] = pred_keypoints_2d[:, 0] * multiplier
-        joints = pred_keypoints_2d.detach().cpu() * box_size[n] + box_center[n, :]
+        if noframe_buffer[n]:
+            box = [0.0, 0.0, 0.0, 0.0]
+            joints = [0.0, 0.0, 1.0] * 21
+        else:
+            pred_keypoints_2d = hamer_out['pred_keypoints_2d'][n, :, :].squeeze()
+            multiplier = (2*is_right-1)
+            pred_keypoints_2d[:, 0] = pred_keypoints_2d[:, 0] * multiplier
+            joints = pred_keypoints_2d.detach().cpu() * box_size[n] + box_center[n, :]
 
-        joints = np.hstack((joints.numpy(), np.ones((21, 1)))).reshape(-1).tolist()
-        
-        box = boxes[n, :].tolist()
+            joints = np.hstack((joints.numpy(), np.ones((21, 1)))).reshape(-1).tolist()
+            
+            box = boxes[n, :].tolist()
         if is_right:
             ujson.dump(joints, kps_right_f)
             kps_right_f.write('\n')
-
             ujson.dump(box, bbx_right_f)
             bbx_right_f.write('\n')
         else:
             ujson.dump(joints, kps_left_f)
             kps_left_f.write('\n')
-
             ujson.dump(box, bbx_left_f)
             bbx_left_f.write('\n')
             
@@ -192,7 +194,14 @@ def main():
         params_txt = "params.txt"
 
     params_path = os.path.join(args.out_dir, params_txt)
-    params = param_utils.read_params(params_path)
+    if "stage1" in args.out_dir:
+        params = param_utils.read_params(params_path, distortion=True)
+        use_parsed = False
+    elif "stage2" in args.out_dir:
+        params = param_utils.read_params(params_path, distortion=False)
+        use_parsed = True
+    else:
+        raise ValueError("Cannot determine whether to assume undistorted.")
     cam_names = list(params[:]["cam_name"])
     cam_names = [c.replace(".", "") for c in cam_names]
     removed_camera_path = os.path.join(args.out_dir, 'ignore_camera.txt')
@@ -266,7 +275,7 @@ def main():
         for v_idx, input_video_path in tqdm(enumerate(reader.vids), total=len(reader.vids)):
             # print(input_video_path)
             # print(intrs[v_idx], dist_intrs[v_idx], dists[v_idx])
-            im_names, orig_imgs, im_h, im_w = frame_preprocess(input_video_path, args.undistort, intrs[v_idx], dist_intrs[v_idx], dists[v_idx])
+            im_names, orig_imgs, im_h, im_w = frame_preprocess(input_video_path, use_parsed, args, intrs[v_idx], dist_intrs[v_idx], dists[v_idx])
             
             video_name = input_video_path.split('/')[-1].split('.')[0]
             
@@ -276,9 +285,17 @@ def main():
             output_bbx_right_file_path = f"{output_bbx_right_path}/{video_name}.jsonl"                
             
             start_time = time.time()
+            if use_parsed:
+                assert args.use_hamer, "Not implemented"
             with open(output_kps_left_file_path, 'w') as kps_left_f, open(output_bbx_left_file_path, 'w') as bbx_left_f, open(output_kps_right_file_path, 'w') as kps_right_f, open(output_bbx_right_file_path, 'w') as bbx_right_f:
                 frame_buffer, bboxes_buffer = [], []
+                noframe_buffer = []
                 for im_name, frame in zip(im_names, orig_imgs):
+                    if frame is None:
+                        frame = np.zeros((im_h, im_w, 3), dtype=np.uint8)
+                        noframe_buffer.append(1)
+                    else:
+                        noframe_buffer.append(0)
                     frame_buffer.append(frame)
                     if len(frame_buffer) == args.batch_size:
                         # Detect humans in image
@@ -295,18 +312,20 @@ def main():
 
                         if args.use_hamer:
                             boxes, right, repeated_frame_buffer = process_all_vitposes_for_hamer(pred_poses, frame_buffer)
+                            noframe_buffer = np.array(noframe_buffer)
+                            repeated_noframe_buffer = noframe_buffer[np.repeat(np.arange(len(noframe_buffer)), 2)]
                             hamer_dataset = ViTDetDataset(hamer_model_cfg, repeated_frame_buffer, boxes, right, rescale_factor=2.0, device=device)
                             hamer_dataloader = torch.utils.data.DataLoader(hamer_dataset, batch_size=args.batch_size * 2, shuffle=False, num_workers=0)
                             for hamer_batch in hamer_dataloader:
                                 with torch.no_grad():
                                     hamer_out = hamer_model(hamer_batch)
                                     recursive_clear(hamer_batch)
-                                prorcess_all_hamerposes(hamer_batch, hamer_out, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f)                            
+                                prorcess_all_hamerposes(repeated_noframe_buffer, hamer_batch, hamer_out, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f)                            
                         else:
                             for pred_pose in pred_poses:
                                 processed_pose = process_all_vitposes(pred_pose, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f)
-                            
-                        frame_buffer, bboxes_buffer = [], []
+
+                        frame_buffer, bboxes_buffer, noframe_buffer = [], [], []
 
                 if len(frame_buffer) > 0:
                     # Detect humans in image
@@ -321,6 +340,8 @@ def main():
 
                     if args.use_hamer:
                         boxes, right, repeated_frame_buffer = process_all_vitposes_for_hamer(pred_poses, frame_buffer)
+                        noframe_buffer = np.array(noframe_buffer)
+                        repeated_noframe_buffer = noframe_buffer[np.repeat(np.arange(len(noframe_buffer)), 2)]
                         hamer_dataset = ViTDetDataset(hamer_model_cfg, repeated_frame_buffer, boxes, right, rescale_factor=2.0, device=device)
                         hamer_dataloader = torch.utils.data.DataLoader(hamer_dataset, batch_size=args.batch_size * 2, shuffle=False, num_workers=0)
                         for hamer_batch in hamer_dataloader:
@@ -328,7 +349,7 @@ def main():
                             with torch.no_grad():
                                 hamer_out = hamer_model(hamer_batch)
                                 recursive_clear(hamer_batch)
-                            prorcess_all_hamerposes(hamer_batch, hamer_out, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f) 
+                            prorcess_all_hamerposes(repeated_noframe_buffer, hamer_batch, hamer_out, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f) 
                                 
                     else:
                         for pred_pose in pred_poses:

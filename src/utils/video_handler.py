@@ -1,34 +1,52 @@
+import numpy as np
 import cv2
 import os
+import glob
+import natsort
+from PIL import Image
 
-def frame_preprocess(path, undistort=False, intr=None, dist_intr=None, dist=None):
-    stream = cv2.VideoCapture(path)
-    assert stream.isOpened(), 'Cannot capture source'
+def frame_preprocess(path, use_parsed, args, intr=None, dist_intr=None, dist=None):
+    if use_parsed:
+        cam_name = os.path.basename(path).split('.')[0][:21]
+        multiseq_chr = args.out_dir.index("multisequence")
+        multiseq = args.out_dir[multiseq_chr:multiseq_chr+19]
+        data_root = args.out_dir[:multiseq_chr]
+        parsed_dir = os.path.join(data_root, multiseq, "parsed")
+        timestamp_dirs = natsort.natsorted(glob.glob(os.path.join(parsed_dir, "timestamp_*")))
+        datalen = min(100, len(timestamp_dirs))
+    else:
+        stream = cv2.VideoCapture(path)
+        assert stream.isOpened(), 'Cannot capture source'
+        datalen = int(stream.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    datalen = int(stream.get(cv2.CAP_PROP_FRAME_COUNT))
     orig_imgs = []
-    im_names = []
-    
+    im_names = []    
     frame_num = 0
     for k in range(datalen):
         if k % 3 == 0 or k % 3 == 1 or k % 3 == 2:
-            (grabbed, frame) = stream.read()
-            # if the `grabbed` boolean is `False`, then we have
-            # reached the end of the video file
-            if not grabbed:
-                stream.release()
-                break
-
-            # orig_imgs.append(frame[:, :, ::-1])
-            if undistort:
-                frame = cv2.undistort(frame, intr, dist, None, dist_intr)
+            if use_parsed:
+                img_path = os.path.join(timestamp_dirs[k], "images", f"{cam_name}.jpg")
+                if os.path.exists(img_path):
+                    frame = np.array(Image.open(img_path))
+                else:
+                    frame = None
+            else:
+                (grabbed, frame) = stream.read()
+                if not grabbed:
+                    stream.release()
+                    break
+                if args.undistort and not (dist == 0).all():
+                    frame = cv2.undistort(frame, intr, dist, None, dist_intr)
             orig_imgs.append(frame)
             im_names.append(f'{frame_num:08d}' + '.jpg')
             frame_num += 1
-    H, W, _ = frame.shape
-    stream.release()
+    for frame in orig_imgs:
+        if frame is not None:
+            H, W, _ = frame.shape
+            break
+    if not use_parsed:
+        stream.release()
 
-    # print(f'Total number of frames: {frame_num} in {path}')
     return im_names, orig_imgs, H, W
 
 def create_video_writer(filename, frame_size, fps=30):

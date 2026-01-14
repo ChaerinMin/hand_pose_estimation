@@ -1,5 +1,5 @@
 {
-    // conda: zeronvs
+    // conda: zeronvs (ccv), mmcv (local)
     "configurations": [
         {
             "name": "Bin to params",
@@ -39,17 +39,20 @@
             "justMyCode": false,
             "args":[
                 // "-r", "/oscar/data/ssrinath/brics/non-pii/brics-mini",
-                "-r", "testv0",
                 // "-s", "2024-06-20",
-                "-s", "2024-04-16",
                 // "-o", "/oscar/data/ssrinath/brics/non-pii/brics-mini/2024-06-20/multisequence000001/calib/stage1/sparse/0",
-                "-o", "testv0",
+                // "-r", "testv0",
+                // "-s", "2024-04-16",
+                // "-o", "testv0",
+                "-r", "/dev/hdd/BRICS",
+                "-s", "2024-06-20",
+                "-o", "/dev/hdd/BRICS/2024-06-20/multisequence000001/calib/stage2/sparse/0",
                 "--ith", "0",
                 "--start", "0",
                 "--end", "-1",
                 "--use_hamer", "True",
                 "--anchor_camera", "brics-odroid-002_cam0",
-                "--use_optim_params"
+                "--use_optim_params",
             ]   
         },
         {
@@ -61,11 +64,14 @@
             "justMyCode": false,
             "args":[
                 // "-r", "/oscar/data/ssrinath/brics/non-pii/brics-mini",
-                "-r", "testv0",
                 // "-s", "2024-06-20",
-                "-s", "2024-04-16",
                 // "-o", "/oscar/data/ssrinath/brics/non-pii/brics-mini/2024-06-20/multisequence000001/calib/stage1/sparse/0",
-                "-o", "testv0",
+                // "-r", "testv0",
+                // "-s", "2024-04-16",
+                // "-o", "testv0",
+                "-r", "/dev/hdd/BRICS",
+                "-s", "2024-06-20",
+                "-o", "/dev/hdd/BRICS/2024-06-20/multisequence000001/calib/stage2/sparse/0",
                 "--ith", "0",
                 "--start", "0",
                 "--end", "-1",
@@ -88,9 +94,12 @@
                 // "-r", "/oscar/data/ssrinath/brics/non-pii/brics-mini",
                 // "-s", "2024-06-20",
                 // "-o", "/oscar/data/ssrinath/brics/non-pii/brics-mini/2024-06-20/multisequence000001/calib/stage1/sparse/0",
-                "-r", "testv0",
-                "-s", "2024-04-16",
-                "-o", "testv0",
+                // "-r", "testv0",
+                // "-s", "2024-04-16",
+                // "-o", "testv0",
+                "-r", "/dev/hdd/BRICS",
+                "-s", "2024-06-20",
+                "-o", "/dev/hdd/BRICS/2024-06-20/multisequence000001/calib/stage2/sparse/0",
                 "--model", "manor",
                 "--body", "handr",
                 "--undistort",
@@ -99,7 +108,7 @@
                 "--end", "-1",
                 "--use_filtered",
                 "--stride", "1",
-                "--to_smooth",
+                // "--to_smooth",
                 "--anchor_camera", "brics-odroid-002_cam0",
                 "--vis_smpl",
                 "--vis_2d_repro",

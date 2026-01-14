@@ -31,7 +31,10 @@ def get_intr(param, undistort=False):
     intr[1, 2] = param["cy_undist" if undistort else "cy"]
 
     # TODO: Make work for arbitrary dist params in opencv
-    dist = np.asarray([param["k1"], param["k2"], param["p1"], param["p2"]])
+    if "k1" in param:
+        dist = np.asarray([param["k1"], param["k2"], param["p1"], param["p2"]])
+    else:
+        dist = np.zeros((4,))
 
     return intr, dist
 
@@ -52,31 +55,53 @@ def get_extr(param):
     return extr
 
 
-def read_params(params_path):
-    params = np.loadtxt(
-        params_path,
-        dtype=[
-            ("cam_id", int),
-            ("width", int),
-            ("height", int),
-            ("fx", float),
-            ("fy", float),
-            ("cx", float),
-            ("cy", float),
-            ("k1", float),
-            ("k2", float),
-            ("p1", float),
-            ("p2", float),
-            ("cam_name", "<U22"),
-            ("qvecw", float),
-            ("qvecx", float),
-            ("qvecy", float),
-            ("qvecz", float),
-            ("tvecx", float),
-            ("tvecy", float),
-            ("tvecz", float),
-        ]
-    )
+def read_params(params_path, distortion):
+    if distortion:
+        params = np.loadtxt(
+            params_path,
+            dtype=[
+                ("cam_id", int),
+                ("width", int),
+                ("height", int),
+                ("fx", float),
+                ("fy", float),
+                ("cx", float),
+                ("cy", float),
+                ("k1", float),
+                ("k2", float),
+                ("p1", float),
+                ("p2", float),
+                ("cam_name", "<U22"),
+                ("qvecw", float),
+                ("qvecx", float),
+                ("qvecy", float),
+                ("qvecz", float),
+                ("tvecx", float),
+                ("tvecy", float),
+                ("tvecz", float),
+            ]
+        )
+    else:
+        params = np.loadtxt(
+            params_path,
+            dtype=[
+                ("cam_id", int),
+                ("width", int),
+                ("height", int),
+                ("fx", float),
+                ("fy", float),
+                ("cx", float),
+                ("cy", float),
+                ("cam_name", "<U22"),
+                ("qvecw", float),
+                ("qvecx", float),
+                ("qvecy", float),
+                ("qvecz", float),
+                ("tvecx", float),
+                ("tvecy", float),
+                ("tvecz", float),
+            ]
+        )  
     params = np.sort(params, order="cam_name")
 
     return params
@@ -106,7 +131,8 @@ def undistort_points(points, intrs, dists, dist_intrs):
             assert len(keypoints.shape) == 2, keypoints.shape
             kpts = keypoints[:, None, :2]
             kpts = np.ascontiguousarray(kpts)
-            kpts = cv2.undistortPoints(kpts, K, dist, P=dist_intrs[nv])
+            if not (dist == 0).all():
+                kpts = cv2.undistortPoints(kpts, K, dist, P=dist_intrs[nv])
             pelvis = np.hstack([kpts[:, 0], keypoints[:, 2:]])
         else:
             pelvis = points[nv].copy()

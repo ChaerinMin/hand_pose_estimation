@@ -69,11 +69,15 @@ def _xyxy2xywh(bbox_xyxy):
 
     return bbox_xywh
 
+if os.path.exists("/gpfs/data/ssrinath/projects/brics-pose"):
+    model_ccv_path = '/gpfs/data/ssrinath/projects/brics-pose/wholebody.pth'
+else:
+    model_ccv_path = "_DATA/wholebody.pth"
 class ViTPoseModel(object):
     MODEL_DICT = {
         'ViTPose+-G (multi-task train, COCO)':{
             'config': f'{VIT_DIR}/configs/wholebody/2d_kpt_sview_rgb_img/topdown_heatmap/coco-wholebody/ViTPose_huge_wholebody_256x192.py',
-            'model_ccv': f'/gpfs/data/ssrinath/projects/brics-pose/wholebody.pth',
+            'model_ccv': model_ccv_path,
             'model_local': f'_DATA/vitpose_ckpts/vitpose+_huge/wholebody.pth',
     }}
 
