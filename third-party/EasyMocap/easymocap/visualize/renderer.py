@@ -187,9 +187,16 @@ class Renderer(object):
                 rend_rgba = np.dstack((rend_rgba, (valid_mask*255).astype(np.uint8)))
             rend_rgba = rend_rgba[..., [2, 1, 0, 3]]
             if add_back:
-                rend_cat = cv2.addWeighted(
-                    cv2.bitwise_and(img, 255 - rend_rgba[:, :, 3:4].repeat(3, 2)), 1, 
-                    cv2.bitwise_and(rend_rgba[:, :, :3], rend_rgba[:, :, 3:4].repeat(3, 2)), 1, 0)
+                # rend_cat = cv2.addWeighted(
+                #     cv2.bitwise_and(img, 255 - rend_rgba[:, :, 3:4].repeat(3, 2)), 1, 
+                #     cv2.bitwise_and(rend_rgba[:, :, :3], rend_rgba[:, :, 3:4].repeat(3, 2)), 1, 0)
+                alpha = rend_rgba[:, :, 3:4].astype(np.float32) / 255.0
+                hand_region = (alpha > 0.5)
+                hand_alpha = np.zeros_like(alpha)
+                hand_alpha[hand_region] = 0.5
+                img_alpha = np.ones_like(alpha)
+                img_alpha[hand_region] = 0.5
+                rend_cat = (rend_rgba[..., :3].astype(np.float32) * hand_alpha + img.astype(np.float32) * img_alpha).clip(0.0, 255.0).astype(np.uint8)
             else:
                 rend_cat = rend_rgba
             
