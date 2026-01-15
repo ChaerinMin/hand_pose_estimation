@@ -243,8 +243,8 @@ def generate_image_patch_skimage(img: np.array, c_x: float, c_y: float,
     res[1] = patch_height
     # assumes bb_width = bb_height
     # assumes patch_width = patch_height
-    assert bb_width == bb_height, f'{bb_width=} != {bb_height=}'
-    assert patch_width == patch_height, f'{patch_width=} != {patch_height=}'
+    assert bb_width == bb_height#, f'{bb_width=} != {bb_height=}'
+    assert patch_width == patch_height#, f'{patch_width=} != {patch_height=}'
     scale1 = scale*bb_width/200.
     
     # Upper left point
@@ -297,12 +297,12 @@ def generate_image_patch_skimage(img: np.array, c_x: float, c_y: float,
         new_img = new_img[pad:-pad, pad:-pad]
 
     if new_img.shape[0] < 1 or new_img.shape[1] < 1:
-        print(f'{img.shape=}')
-        print(f'{new_img.shape=}')
-        print(f'{ul=}')
-        print(f'{br=}')
-        print(f'{pad=}')
-        print(f'{rot=}')
+        # print(f'{img.shape=}')
+        # print(f'{new_img.shape=}')
+        # print(f'{ul=}')
+        # print(f'{br=}')
+        # print(f'{pad=}')
+        # print(f'{rot=}')
 
         breakpoint()
 
@@ -488,7 +488,7 @@ def mano_param_processing(mano_params: Dict, has_mano_params: Dict, rot: float, 
 
 
 
-def get_example(img_path: str|np.ndarray, center_x: float, center_y: float,
+def get_example(img_path, center_x: float, center_y: float,
                 width: float, height: float,
                 keypoints_2d: np.array, keypoints_3d: np.array,
                 mano_params: Dict, has_mano_params: Dict,
@@ -499,7 +499,7 @@ def get_example(img_path: str|np.ndarray, center_x: float, center_y: float,
                 is_bgr: bool = True,
                 use_skimage_antialias: bool = False,
                 border_mode: int = cv2.BORDER_CONSTANT,
-                return_trans: bool = False) -> Tuple:
+                return_trans = False) -> Tuple:
     """
     Get an example from the dataset and (possibly) apply random augmentations.
     Args:
