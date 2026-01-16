@@ -41,18 +41,18 @@ def load_model(gender='neutral', use_cuda=True, model_type='smpl', skel_type='bo
     body_model.to(device)
     return body_model
 
-def vis_smpl(args, vertices, faces, images, nf, cameras, mode='smpl', extra_data=[], add_back=True, out_dir='mano'):
+def vis_smpl(args, vertices, faces, images, nf, cameras, mode='smpl', extra_data=[], add_back=True, out_dir='mano', confident=None):
     render_data = {}
     assert vertices.shape[1] == 3 and len(vertices.shape) == 2, 'shape {} != (N, 3)'.format(vertices.shape)
     pid = 0
     render_data[pid] = {'vertices': vertices, 'faces': faces, 
         'vid': pid, 'name': 'human_{}_{}'.format(nf, pid)}
     render = Renderer(height=1024, width=1024, faces=None)
-    render_results = render.render(render_data, cameras, images, add_back=add_back)
+    render_results = render.render(render_data, cameras, images, add_back=add_back, confident=confident)
     image_vis = merge(render_results, resize=not args.save_origin)
-    if args.save_frame:
-        outname = os.path.join(out_dir, '{:08d}.jpg'.format(nf))
-        cv2.imwrite(outname, image_vis)
+    # if args.save_frame:
+    outname = os.path.join(out_dir, '{:08d}.jpg'.format(nf))
+    cv2.imwrite(outname, image_vis)
     # else:
     #     out_dir.write(image_vis)
     return image_vis, render_results
@@ -74,7 +74,7 @@ def projectN3(kpts3d, cameras):
     return kp2ds
 
 # visualize reprojection from easymocap/dataset/mv1pmf.py
-def vis_repro(args, images, kpts_repro, nf, config, to_img=True, mode='repro', outdir='mano_keypoints', vis_id=True):
+def vis_repro(args, images, kpts_repro, nf, config, to_img=True, mode='repro', outdir='mano_keypoints', vis_id=True, cameras=None, confident=None):
     lDetections = []
     for nv in range(len(images)):
         det = {
@@ -99,14 +99,24 @@ def vis_repro(args, images, kpts_repro, nf, config, to_img=True, mode='repro', o
                 bbox = det['bbox']
             # plot_bbox(img, bbox, pid=pid, vis_id=vis_id)
             plot_keypoints(img, keypoints, pid=pid, config=config, use_limb_color=True, lw=4)
+        if cameras is not None:
+            cname = cameras["names"][nv]
+            if confident is not None:
+                if confident[cname]:
+                    text_color = (0, 0, 255)
+                else:
+                    text_color = (0, 0, 0)
+            else:
+                text_color = (255, 255, 255)
+            cv2.putText(img, cname.replace(".jpg", ""), (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 2, text_color, 2)
         images_vis.append(img)
     if len(images_vis) > 1:
         images_vis = merge(images_vis, resize=not args.save_origin)
     else:
         images_vis = images_vis[0]
-    if args.save_frame:
-        outname = os.path.join(outdir, '{:06d}.jpg'.format(nf))
-        cv2.imwrite(outname, images_vis)
+    # if args.save_frame:
+    outname = os.path.join(outdir, '{:06d}.jpg'.format(nf))
+    cv2.imwrite(outname, images_vis)
     # else:
     #     outdir.write(images_vis)
     return images_vis

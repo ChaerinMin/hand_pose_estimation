@@ -22,6 +22,18 @@ def qvec2rotmat(qvec):
         ]
     )
 
+def rotmat2qvec(R):
+    Rxx, Ryx, Rzx, Rxy, Ryy, Rzy, Rxz, Ryz, Rzz = R.flat
+    K = np.array([
+        [Rxx - Ryy - Rzz, 0, 0, 0],
+        [Ryx + Rxy, Ryy - Rxx - Rzz, 0, 0],
+        [Rzx + Rxz, Rzy + Ryz, Rzz - Rxx - Ryy, 0],
+        [Ryz - Rzy, Rzx - Rxz, Rxy - Ryx, Rxx + Ryy + Rzz]]) / 3.0
+    eigvals, eigvecs = np.linalg.eigh(K)
+    qvec = eigvecs[[3, 0, 1, 2], np.argmax(eigvals)]
+    if qvec[0] < 0:
+        qvec *= -1
+    return qvec
 
 def get_intr(param, undistort=False):
     intr = np.eye(3)
@@ -138,3 +150,104 @@ def undistort_points(points, intrs, dists, dist_intrs):
             pelvis = points[nv].copy()
         pelvis_undis.append(pelvis)
     return pelvis_undis
+
+def optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False):
+    """
+    cameras: Dict with 'K', 'R', 'T', 'dist', 'P', 'names'
+    all_kp2d: np.ndarray (views, N, 3)
+    all_kp3d: np.ndarray (N, 4)
+
+    Returns:
+        new_rot: np.ndarray (views, 3, 3)
+        new_tr: np.ndarray (views, 3)
+    """
+    assert cameras['R'].shape[0] == all_kp2d.shape[0]
+    all_kp2d = all_kp2d[..., :2].astype(np.float32)
+    all_kp3d = all_kp3d[:, :3].astype(np.float32)
+    new_rot = []
+    new_tr = []
+    init_errors = 0
+    final_errors = 0
+    num_points = 0
+    for v in range(all_kp2d.shape[0]):
+        cname = cameras['names'][v]
+        intrinsic = cameras['K'][v].astype(np.float32)
+        dist = cameras['dist'][v].astype(np.float32)
+        R_init = cameras['R'][v]
+        T_init = cameras['T'][v]
+        rvec_init = cv2.Rodrigues(R_init)[0].astype(np.float32)
+        tvec_init = T_init.reshape(3, 1).astype(np.float32)
+        kp2d = all_kp2d[v]
+        kp3d = all_kp3d.copy()
+        valid = np.logical_not((kp2d == 0).all(axis=-1))  # (N,)
+        if valid.sum() == 0:
+            new_rot.append(R_init)
+            new_tr.append(T_init)
+            print(f"No valid 2D keypoints for {cname}")
+            continue
+        init_projected, _ = cv2.projectPoints(
+            kp3d[valid], rvec_init, tvec_init, intrinsic, dist
+        )
+        init_error = np.mean(np.linalg.norm(kp2d[valid] - init_projected.squeeze(), axis=-1))
+        print(f"Initial Error for {cname}: {init_error:.4f}")
+        init_errors += init_error * valid.sum()
+        num_points += valid.sum()
+        if inspect_only:
+            continue
+        success, rvec_opt, t_opt, _ = cv2.solvePnPRansac(
+            imagePoints=kp2d[valid],
+            objectPoints=kp3d[valid],
+            cameraMatrix=intrinsic,
+            distCoeffs=dist,
+            rvec=rvec_init,
+            tvec=tvec_init,
+        )
+        if success:
+            opt_projected, _ = cv2.projectPoints(
+                kp3d[valid], rvec_opt, t_opt, intrinsic, dist
+            )
+            opt_error = np.mean(
+                np.linalg.norm(kp2d[valid] - opt_projected.squeeze(), axis=-1)
+            )
+            print(f"Optimized Error for {cname}: {opt_error:.4f}")
+            if np.abs(opt_error - init_error) / init_error < 0.1:
+                new_rot.append(R_init)
+                new_tr.append(T_init)
+                final_errors += init_error * valid.sum()
+            else:
+                R_opt, _ = cv2.Rodrigues(rvec_opt)
+                new_rot.append(R_opt)
+                new_tr.append(t_opt.flatten())
+                final_errors += opt_error * valid.sum()
+        else:
+            new_rot.append(R_init)
+            new_tr.append(T_init)
+            print(f"SolvePNPRansac failed for {cname}")
+            final_errors += init_error * valid.sum()
+    new_rot = np.array(new_rot)
+    new_tr = np.array(new_tr)
+    print(f"Average Initial Reprojection Error: {init_errors / num_points:.4f}")
+    print(f"Average Final Reprojection Error: {final_errors / num_points:.4f}")
+    return new_rot, new_tr
+
+def update_extrinsics(pth, params, new_rot, new_tr) -> None:
+    """
+    new_rot: np.ndarray (views, 3, 3)
+    new_tr: np.ndarray (views, 3)
+    """
+    qvec = []
+    for new_r in new_rot:
+        quaternion = -rotmat2qvec(new_r)
+        qvec.append(quaternion)
+    qvec = np.array(qvec)
+    new_params = params.copy()
+    new_params["qvecw"] = qvec[:, 0]
+    new_params["qvecx"] = qvec[:, 1]
+    new_params["qvecy"] = qvec[:, 2]
+    new_params["qvecz"] = qvec[:, 3]
+    new_params["tvecx"] = new_tr[:, 0]
+    new_params["tvecy"] = new_tr[:, 1]
+    new_params["tvecz"] = new_tr[:, 2]
+    np.savetxt(pth, new_params, fmt="%s", header=" ".join(new_params.dtype.fields))
+    print(f"Updated extrinsics saved to {pth}")
+    return

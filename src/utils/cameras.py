@@ -81,6 +81,7 @@ def get_projections(args, params, cam_names, cam_mapper, easymocap_format=False)
     dists = []
     rot = []
     trans = []
+    cnames = []
 
     for param in params:
         if (param["cam_name"] in cam_names) and (param["cam_name"] in cam_mapper):
@@ -95,7 +96,7 @@ def get_projections(args, params, cam_names, cam_mapper, easymocap_format=False)
             trans.append(t)
             intrs.append(intr.copy())
             dists.append(dist)
-            
+            cnames.append(param["cam_name"])
             if args.undistort and not (dist == 0).all():
                 new_intr = param_utils.get_undistort_params(intr, dist, (w, h))
                 dist_intrs.append(new_intr.copy())
@@ -112,14 +113,17 @@ def get_projections(args, params, cam_names, cam_mapper, easymocap_format=False)
             'R': np.asarray(rot), 
             'T': np.asarray(trans),
             'dist': zero_dists if args.undistort else np.asarray(dists),
-            'P': np.asarray(projs) }
+            'P': np.asarray(projs),
+            'names': cnames }
     elif args.undistort:
         cameras = { 'K': np.asarray(dist_intrs),
                     'R': np.asarray(rot), 
-                    'T': np.asarray(trans) }
+                    'T': np.asarray(trans),
+                    'names': cnames }
     else:
         cameras = { 'K': np.asarray(intrs),
                     'R': np.asarray(rot), 
-                    'T': np.asarray(trans) }
+                    'T': np.asarray(trans),
+                    'names': cnames }
     
     return intrs, np.asarray(projs), dist_intrs, dists, cameras

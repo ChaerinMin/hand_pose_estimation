@@ -1,3 +1,4 @@
+import os
 import torch
 import pytorch_lightning as pl
 from typing import Any, Dict, Mapping, Tuple
@@ -49,6 +50,10 @@ class HAMER(pl.LightningModule):
 
         # Instantiate MANO model
         mano_cfg = {k.lower(): v for k,v in dict(cfg.MANO).items()}
+        if os.path.exists("/oscar/data/ssrinath"):
+            mano_cfg['model_path'] = "/oscar/data/ssrinath/users/cmin5/smplx/mano"
+        else:
+            mano_cfg["model_path"] = "/dev/hdd/hand_pose_estimation/_DATA/data/mano"
         self.mano = MANO(**mano_cfg)
 
         # Buffer that shows whetheer we need to initialize ActNorm layers

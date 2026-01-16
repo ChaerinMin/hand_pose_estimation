@@ -1,19 +1,10 @@
 import os
 import sys
-import cv2
 import ujson
-import torch
 import shutil
 import argparse
-import tempfile
-import platform
 import numpy as np
-# import xml.etree.cElementTree as ET
-
 from tqdm import tqdm
-from glob import glob
-from natsort import natsorted
-
 sys.path.append(".")
 from src.utils.reader_v2 import Reader
 import src.utils.params as param_utils
@@ -37,6 +28,8 @@ parser.add_argument("--easymocap", default=False, action="store_true", help='use
 parser.add_argument('--remove_side_cam', type=bool, default=True, help='Remove Side Cameras')
 parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove Bottom Cameras')
 parser.add_argument("--ignore_missing_tip", action="store_true", help="Should a missing fingertip be allowed")
+parser.add_argument("--confidence_thresh", type=float, default=None, help="camera conficence")
+parser.add_argument("--optimize_bad_views", action="store_true", help="Whether to optimize extrinsics of bad views")
 args = parser.parse_args()
 
 
@@ -96,7 +89,14 @@ if args.ith == -1:
             selected_vid_idxs = list(range(total_video_idxs))
 else:       
     selected_vid_idxs = [args.ith]
-    
+
+# camera confidence
+if args.confidence_thresh is not None:
+    conf_dir = args.out_dir[:args.out_dir.index("/stage")]
+    conf_path = os.path.join(conf_dir, "image_confidence.json")
+    with open(conf_path, "r") as f:
+        image_confidence = ujson.load(f)
+
 for selected_vid_idx in selected_vid_idxs:
     print(f'Video ID {selected_vid_idx}...')
     
@@ -134,6 +134,7 @@ for selected_vid_idx in selected_vid_idxs:
 
     all_keypoints2d_left = []
     all_keypoints2d_right = []
+    cam_confidence = []
     for cam in cur_cam_names:
         if cam in cam_mapper:
             keypoints2d_left = []
@@ -170,14 +171,19 @@ for selected_vid_idx in selected_vid_idxs:
                     keypoints2d_right[:2][valid_right[:2]] = apply_one_euro_filter_3d(keypoints2d_right[:2][valid_right[:2]], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
             all_keypoints2d_left.append(keypoints2d_left)
             all_keypoints2d_right.append(keypoints2d_right)
+            if args.confidence_thresh is not None:
+                cam_conf = image_confidence[cam+".jpg"]["num_visible_3D_points"]
+                cam_confidence.append(cam_conf)
     all_keypoints2d_left = np.asarray(all_keypoints2d_left)
     all_keypoints2d_right = np.asarray(all_keypoints2d_right)
-
+    cam_confidence = np.asarray(cam_confidence)
 
     keypt_file_left = os.path.join(keypoints3d_dir, "left.jsonl")
     keypt_file_right = os.path.join(keypoints3d_dir, "right.jsonl")
     chosen_frames_left = []
     chosen_frames_right = []
+    all_keypoints3d_left = []
+    all_keypoints3d_right = []
     print(f"Writing 3D keypoints to {keypt_file_left}")
     print(f"Writing 3D keypoints to {keypt_file_right}")
     with open(keypt_file_left, "w") as fl, open(keypt_file_right, "w") as fr:
@@ -201,6 +207,9 @@ for selected_vid_idx in selected_vid_idxs:
                         (keypoints2d_right[:, :, 2] == 1).all(axis=1)
                     )
                 )
+                if args.confidence_thresh is not None:
+                    valid_left = np.logical_and(valid_left, cam_confidence >= float(args.confidence_thresh))
+                    valid_right = np.logical_and(valid_right, cam_confidence >= float(args.confidence_thresh))
                 if not args.easymocap:
                     keypoints3d_left, residuals = triangulate_joints(np.asarray(keypoints2d_left)[valid_left], np.asarray(projs)[valid_left], processor=ransac_processor, residual_threshold=10, min_samples=5)
                     print(f"Error: {residuals.mean()}")
@@ -210,21 +219,29 @@ for selected_vid_idx in selected_vid_idxs:
                     triangulation = SimpleTriangulate("iterative")
                     valid_cameras = {}
                     for k_cam in cameras:
+                        if k_cam == "names":
+                            continue
                         valid_cameras[k_cam] = cameras[k_cam][valid_left]
                     keypoints3d_left = triangulation(np.asarray(keypoints2d_left)[valid_left], valid_cameras)['keypoints3d']
                     valid_cameras = {}
                     for k_cam in cameras:
+                        if k_cam == "names":
+                            continue
                         valid_cameras[k_cam] = cameras[k_cam][valid_right]
                     keypoints3d_right = triangulation(np.asarray(keypoints2d_right)[valid_right], valid_cameras)['keypoints3d']
                 ujson.dump(keypoints3d_left.tolist(), fl)
                 fl.write('\n')
                 ujson.dump(keypoints3d_right.tolist(), fr)
                 fr.write('\n')
+                all_keypoints3d_left.append(keypoints3d_left)
+                all_keypoints3d_right.append(keypoints3d_right)
             else:
                 ujson.dump(np.zeros((21,4)).tolist(), fl)
                 fl.write('\n')
                 ujson.dump(np.zeros((21,4)).tolist(), fr)
                 fr.write('\n')
+                all_keypoints3d_left.append(np.zeros((21,4)))
+                all_keypoints3d_right.append(np.zeros((21,4)))
             
             to_use_left = np.ones(1, dtype=bool)
             to_use_right = np.ones(1, dtype=bool)
@@ -243,7 +260,34 @@ for selected_vid_idx in selected_vid_idxs:
                 chosen_frames_left.append(l_idx)
             if np.any(to_use_right):
                 chosen_frames_right.append(l_idx)       
-            
+
+    all_kp2d_left = []  # (frames, view, 21, 3)
+    all_kp2d_right = []
+    all_kp3d_left = []  # (frames, 21, 4)
+    all_kp3d_right = []
+    for l_idx in range(len(all_keypoints3d_left)):
+        if l_idx in chosen_frames:
+            all_kp2d_left.append(all_keypoints2d_left[:, l_idx, :, :])
+            all_kp2d_right.append(all_keypoints2d_right[:, l_idx, :, :])
+            all_kp3d_left.append(all_keypoints3d_left[l_idx])
+            all_kp3d_right.append(all_keypoints3d_right[l_idx])
+    all_kp2d_left = np.asarray(all_kp2d_left).transpose(1,0,2,3)  # (view, frames, 21, 3)
+    all_kp2d_right = np.asarray(all_kp2d_right).transpose(1,0,2,3)
+    all_kp3d_left = np.asarray(all_kp3d_left)  # (frames, 21, 4)
+    all_kp3d_right = np.asarray(all_kp3d_right)
+    all_kp2d_left = all_kp2d_left.reshape(all_kp2d_left.shape[0], -1, 3)  # (view, points, 3)
+    all_kp2d_right = all_kp2d_right.reshape(all_kp2d_right.shape[0], -1, 3)
+    all_kp3d_left = all_kp3d_left.reshape(-1, 4)  # (points, 4)
+    all_kp3d_right = all_kp3d_right.reshape(-1, 4)
+    all_kp2d = np.concatenate([all_kp2d_left, all_kp2d_right], axis=1)  # (view, points, 3)
+    all_kp3d = np.concatenate([all_kp3d_left, all_kp3d_right], axis=0)  # (points, 4)
+    if args.optimize_bad_views:  
+        new_rot, new_tr = param_utils.optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False)
+        new_params_path = os.path.join(output_path, "new_params.txt")
+        param_utils.update_extrinsics(new_params_path, params, new_rot, new_tr)
+    else:
+        param_utils.optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=True)
+              
     chosen_path_left = os.path.join(keypoints3d_dir, f"chosen_frames_left.json")
     chosen_path_right = os.path.join(keypoints3d_dir, f"chosen_frames_right.json")
     with open(chosen_path_left, "w") as f:

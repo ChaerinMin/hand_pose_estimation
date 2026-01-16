@@ -80,7 +80,9 @@
                 "--all_frames",
                 "--easymocap",
                 "--to_smooth",
-                "--use_optim_params"
+                "--use_optim_params",
+                "--confidence_thresh", "100",
+                "--optimize_bad_views"
             ]   
         },
         {
@@ -115,7 +117,9 @@
                 "--vis_3d_repro",
                 "--save_mesh",
                 // "--save_frame",
-                "--use_optim_params"
+                "--use_optim_params",
+                "--confidence_thresh", "100",
+                "--optimize_bad_views"
             ]   
         }
     ]

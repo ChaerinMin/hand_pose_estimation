@@ -104,7 +104,7 @@ class Renderer(object):
 
     def render(self, render_data, cameras, images,
         use_white=False, add_back=True,
-        ret_depth=False, ret_color=False):
+        ret_depth=False, ret_color=False, confident=None):
         # Need to flip x-axis
         rot = trimesh.transformations.rotation_matrix(
             np.radians(180), [1, 0, 0])
@@ -115,6 +115,7 @@ class Renderer(object):
             else:
                 img = img_.copy()
             K, R, T = cameras['K'][nv].copy(), cameras['R'][nv], cameras['T'][nv]
+            cname = cameras['names'][nv].replace(".jpg", "")
             # down scale the image to speed up rendering
             img = cv2.resize(img, None, fx=1/self.down_scale, fy=1/self.down_scale)
             K[:2, :] /= self.down_scale
@@ -197,6 +198,15 @@ class Renderer(object):
                 img_alpha = np.ones_like(alpha)
                 img_alpha[hand_region] = 0.5
                 rend_cat = (rend_rgba[..., :3].astype(np.float32) * hand_alpha + img.astype(np.float32) * img_alpha).clip(0.0, 255.0).astype(np.uint8)
+                rend_cat = rend_cat.copy()
+                if confident is not None:
+                    if confident[cname]:
+                        text_color = (0, 0, 255)
+                    else:
+                        text_color = (0, 0, 0)
+                else:
+                    text_color = (255, 255, 255)
+                cv2.putText(rend_cat, cname, (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 2, text_color, 2)
             else:
                 rend_cat = rend_rgba
             
