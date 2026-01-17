@@ -166,9 +166,8 @@ def optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False):
     all_kp3d = all_kp3d[:, :3].astype(np.float32)
     new_rot = []
     new_tr = []
-    init_errors = 0
-    final_errors = 0
-    num_points = 0
+    init_errors = []
+    final_errors = []
     for v in range(all_kp2d.shape[0]):
         cname = cameras['names'][v]
         intrinsic = cameras['K'][v].astype(np.float32)
@@ -180,6 +179,13 @@ def optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False):
         kp2d = all_kp2d[v]
         kp3d = all_kp3d.copy()
         valid = np.logical_not((kp2d == 0).all(axis=-1))  # (N,)
+        valid = np.logical_and(
+            valid,
+            np.logical_and(
+                np.logical_and(kp2d[:, 0] < 1280, kp2d[:, 0] >= 0),
+                np.logical_and(kp2d[:, 1] < 720, kp2d[:, 1] >= 0)
+            )
+        )
         if valid.sum() == 0:
             new_rot.append(R_init)
             new_tr.append(T_init)
@@ -188,15 +194,20 @@ def optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False):
         init_projected, _ = cv2.projectPoints(
             kp3d[valid], rvec_init, tvec_init, intrinsic, dist
         )
-        init_error = np.mean(np.linalg.norm(kp2d[valid] - init_projected.squeeze(), axis=-1))
-        print(f"Initial Error for {cname}: {init_error:.4f}")
-        init_errors += init_error * valid.sum()
-        num_points += valid.sum()
+        proj_valid = np.logical_and(
+            np.logical_and(init_projected[..., 0] < 1280, init_projected[..., 0] >= 0),
+            np.logical_and(init_projected[..., 1] < 720, init_projected[..., 1] >= 0)
+        ).squeeze()
+        init_error = np.linalg.norm(kp2d[valid][proj_valid] - init_projected[proj_valid].squeeze(), axis=-1)
+        init_errors.append(init_error)
+        init_err_mean = np.mean(init_error)
+        print(f"Initial Error for {cname}: {init_err_mean:.4f}")
+        # init_errors += init_error * valid.sum()
         if inspect_only:
             continue
         success, rvec_opt, t_opt, _ = cv2.solvePnPRansac(
-            imagePoints=kp2d[valid],
-            objectPoints=kp3d[valid],
+            imagePoints=kp2d[valid][proj_valid],
+            objectPoints=kp3d[valid][proj_valid],
             cameraMatrix=intrinsic,
             distCoeffs=dist,
             rvec=rvec_init,
@@ -206,28 +217,34 @@ def optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False):
             opt_projected, _ = cv2.projectPoints(
                 kp3d[valid], rvec_opt, t_opt, intrinsic, dist
             )
-            opt_error = np.mean(
-                np.linalg.norm(kp2d[valid] - opt_projected.squeeze(), axis=-1)
-            )
-            print(f"Optimized Error for {cname}: {opt_error:.4f}")
-            if np.abs(opt_error - init_error) / init_error < 0.1:
+            opt_error = np.linalg.norm(kp2d[valid][proj_valid] - opt_projected[proj_valid].squeeze(), axis=-1)
+            opt_err_mean = np.mean(opt_error)
+            print(f"Optimized Error for {cname}: {opt_err_mean:.4f}")
+            if np.abs(opt_err_mean - init_err_mean) / init_err_mean < 0.1:
                 new_rot.append(R_init)
                 new_tr.append(T_init)
-                final_errors += init_error * valid.sum()
+                final_errors.append(init_error)
             else:
                 R_opt, _ = cv2.Rodrigues(rvec_opt)
                 new_rot.append(R_opt)
                 new_tr.append(t_opt.flatten())
-                final_errors += opt_error * valid.sum()
+                final_errors.append(opt_error)
         else:
             new_rot.append(R_init)
             new_tr.append(T_init)
             print(f"SolvePNPRansac failed for {cname}")
-            final_errors += init_error * valid.sum()
+            final_errors.append(init_error)
     new_rot = np.array(new_rot)
     new_tr = np.array(new_tr)
-    print(f"Average Initial Reprojection Error: {init_errors / num_points:.4f}")
-    print(f"Average Final Reprojection Error: {final_errors / num_points:.4f}")
+    init_errors = np.concatenate(init_errors)
+    print(f"Average Initial Reprojection Error: {np.mean(init_errors):.4f}")
+    print(f"Max Initial Reprojection Error: {np.max(init_errors):.4f}")
+    print(f"Std Initial Reprojection Error: {np.std(init_errors):.4f}")
+    if final_errors:
+        final_errors = np.concatenate(final_errors)
+        print(f"Average Final Reprojection Error: {np.mean(final_errors):.4f}")
+        print(f"Max Final Reprojection Error: {np.max(final_errors):.4f}")
+        print(f"Std Final Reprojection Error: {np.std(final_errors):.4f}")
     return new_rot, new_tr
 
 def update_extrinsics(pth, params, new_rot, new_tr) -> None:

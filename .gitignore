@@ -13,3 +13,5 @@ testv0/repro_2d
 testv0/repro_3d
 ignore_camera.txt
 _DATA/
+sbatch_err/
+sbatch_out/
