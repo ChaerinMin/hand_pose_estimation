@@ -188,6 +188,8 @@ for selected_vid_idx in selected_vid_idxs:
     print(f"Writing 3D keypoints to {keypt_file_right}")
     with open(keypt_file_left, "w") as fl, open(keypt_file_right, "w") as fr:
         for l_idx in tqdm(range(reader.frame_count), total=reader.frame_count):
+            if l_idx >= all_keypoints2d_left.shape[1]:
+                break
             if l_idx in chosen_frames:
                 keypoints2d_left = all_keypoints2d_left[:, l_idx, :, :]
                 keypoints2d_right = all_keypoints2d_right[:, l_idx, :, :]

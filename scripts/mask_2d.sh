@@ -17,12 +17,15 @@ echo Directory is `pwd`
 module load ffmpeg
 
 # configs
-ROOT_DIR="/oscar/data/ssrinath/brics/non-pii/brics-mini"
-SEQ="2024-06-20"
-OUT_DIR="/oscar/data/ssrinath/brics/non-pii/brics-mini/2024-06-20/multisequence000001/calib/stage2/sparse/0"
+# ROOT_DIR="/oscar/data/ssrinath/brics/non-pii/brics-mini"
+# SEQ="2024-06-20"
+# OUT_DIR="/oscar/data/ssrinath/brics/non-pii/brics-mini/2024-06-20/multisequence000001/calib/stage2/sparse/0"
+ROOT_DIR="/oscar/data/ssrinath/public/brics-mini"
+SEQ="2026-01-15"
+OUT_DIR="/oscar/data/ssrinath/public/brics-mini/2026-01-15/multisequence000001/calib/stage2/sparse/0"
 
 # run 2D mask extraction
 python -m scripts.mask_2d -r "$ROOT_DIR" -s "$SEQ" -o "$OUT_DIR" \
     --ith 0 --start 0 --end -1 \
-    --anchor_camera "brics-odroid-002_cam0" --use_optim_params \
+    --use_optim_params \
     --v_idx $SLURM_ARRAY_TASK_ID

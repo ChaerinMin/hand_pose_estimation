@@ -17,11 +17,8 @@ from matplotlib import pyplot as plt
 import numpy as np
 from PIL import Image
 import torch
-from sam3.model_builder import build_sam3_video_predictor
-from sam3.visualization_utils import (
-    prepare_masks_for_visualization,
-    visualize_formatted_frame_output,
-)
+from sam3.model_builder import build_sam3_image_model
+from sam3.model.sam3_image_processor import Sam3Processor
 from tqdm import tqdm
 import ujson
 
@@ -29,37 +26,60 @@ from src.utils.cameras import removed_cameras, map_camera_names, get_projections
 from src.utils.parser import add_common_args
 import src.utils.params as param_utils
 from src.utils.reader_v2 import Reader
-from src.utils.video_handler import frame_preprocess
+from src.utils.video_handler import frame_preprocess, load_first_frame
 from easymocap.mytools.vis_base import merge, get_row_col
 
-def propagate_in_video(predictor, session_id):
-    outputs_per_frame = {}
-    for response in predictor.handle_stream_request(
-        request=dict(
-            type="propagate_in_video",
-            session_id=session_id,
-        )
-    ):
-        outputs_per_frame[response["frame_index"]] = response["outputs"]
 
-    return outputs_per_frame
-
-def abs_to_rel_coords(coords, IMG_WIDTH, IMG_HEIGHT, coord_type="point"):
-    """Convert absolute coordinates to relative coordinates (0-1 range)
+def compute_hand_bbox(keypoints, valid_mask, im_w, im_h, padding_ratio=0.2):
+    """Compute bounding box around hand keypoints with padding
 
     Args:
-        coords: List of coordinates
-        coord_type: 'point' for [x, y] or 'box' for [x, y, w, h]
+        keypoints: (21, 3) array of keypoints [x, y, confidence]
+        valid_mask: (21,) boolean array indicating valid keypoints
+        im_w: image width
+        im_h: image height
+        padding_ratio: ratio of bbox size to add as padding (e.g., 0.2 = 20%)
+
+    Returns:
+        bbox: [xmin, ymin, xmax, ymax] in absolute coordinates
     """
-    if coord_type == "point":
-        return [[x / IMG_WIDTH, y / IMG_HEIGHT] for x, y in coords]
-    elif coord_type == "box":
-        return [
-            [x / IMG_WIDTH, y / IMG_HEIGHT, w / IMG_WIDTH, h / IMG_HEIGHT]
-            for x, y, w, h in coords
-        ]
-    else:
-        raise ValueError(f"Unknown coord_type: {coord_type}")
+    valid_points = keypoints[valid_mask][:, :2]  # (n_points, 2)
+    if len(valid_points) == 0:
+        return None
+
+    xmin, ymin = valid_points.min(axis=0)
+    xmax, ymax = valid_points.max(axis=0)
+
+    # Add padding
+    width = xmax - xmin
+    height = ymax - ymin
+    padding_x = int(padding_ratio * width)
+    padding_y = int(padding_ratio * height)
+
+    xmin = max(0, int(xmin - padding_x))
+    ymin = max(0, int(ymin - padding_y))
+    xmax = min(im_w - 1, int(xmax + padding_x))
+    ymax = min(im_h - 1, int(ymax + padding_y))
+
+    return [xmin, ymin, xmax, ymax]
+
+def crop_image(image, bbox):
+    """Crop image given bounding box
+
+    Args:
+        image: numpy array or PIL Image
+        bbox: [xmin, ymin, xmax, ymax]
+
+    Returns:
+        cropped_image: PIL Image
+        bbox: same bbox for reference
+    """
+    if isinstance(image, np.ndarray):
+        image = Image.fromarray(image)
+
+    xmin, ymin, xmax, ymax = bbox
+    cropped = image.crop((xmin, ymin, xmax, ymax))
+    return cropped, bbox
     
 parser = argparse.ArgumentParser()
 add_common_args(parser)
@@ -192,31 +212,35 @@ for selected_vid_idx in selected_vid_idxs:
     print("Reader Length", len(reader.vids))
 
     # output dirs
-    mask_left_dir = os.path.join(output_path, "mask_2d", "left", str(selected_vid_idx).zfill(3))
-    mask_right_dir = os.path.join(output_path, "mask_2d", "right", str(selected_vid_idx).zfill(3))
-    vis_dir = os.path.join(output_path, "mask_2d", "vis_"+str(selected_vid_idx).zfill(3))
-    os.makedirs(mask_left_dir, exist_ok=True)
-    os.makedirs(mask_right_dir, exist_ok=True)
-    os.makedirs(vis_dir, exist_ok=True)
+    mask_dir = os.path.join(output_path, "mask_2d", str(selected_vid_idx).zfill(3))
+    os.makedirs(mask_dir, exist_ok=True)
+
+    # Store visualization images for collage
+    collage_images = []
+    collage_camnames = []
+
+    # Store all masks in a dictionary (will save as single npz)
+    # Keys: camname, Values: (H, W) array with 0=empty, 1=left hand, 2=right hand
+    all_masks = {}
+    # Store segmentation success status
+    # Keys: camname_left/camname_right, Values: boolean
+    seg_status = {}
+
+    # Build SAM3 model once (reuse for all images)
+    model = build_sam3_image_model(checkpoint_path=args.sam_path)
+    processor = Sam3Processor(model)
 
     for v_idx, input_video_path in tqdm(enumerate(reader.vids), total=len(reader.vids)):
-        if args.v_idx is not None and v_idx != args.v_idx:
-            continue
         if args.collage_only:
             break
-        exist_ids = []
 
-        # read images
-        im_names, orig_imgs, im_h, im_w = frame_preprocess(
+        # read first frame only
+        orig_img, im_h, im_w = load_first_frame(
             input_video_path, use_parsed, args, intrs[v_idx], dist_intrs[v_idx], dists[v_idx]
         )
-        orig_images = []
-        for l_idx, orig_img in enumerate(orig_imgs):
-            if orig_img is not None:
-                exist_ids.append(l_idx)
-                orig_images.append(Image.fromarray(orig_img))
+        orig_image = Image.fromarray(orig_img)
 
-        # read 2D keypoints
+        # read 2D keypoints for the first frame
         camname = input_video_path.split('/')[-2]
         ap_keypoints_path_left = os.path.join(
             keypoints2d_dir_left, f"{cam_mapper[camname]}.jsonl"
@@ -224,259 +248,178 @@ for selected_vid_idx in selected_vid_idxs:
         ap_keypoints_path_right = os.path.join(
             keypoints2d_dir_right, f"{cam_mapper[camname]}.jsonl"
         )
-        keypoints2d_left = []
-        keypoints2d_right = []
-        with open(ap_keypoints_path_left, "r") as fl, open(ap_keypoints_path_right, "r") as fr:
-            for l_idx, (linel, liner) in enumerate(zip(fl, fr)):
-                if l_idx in set(exist_ids):
-                    keypoints2d_left.append(np.array(ujson.loads(linel)).reshape(-1, 3))
-                    keypoints2d_right.append(np.array(ujson.loads(liner)).reshape(-1, 3))
-        keypoints2d_left = np.array(keypoints2d_left)  # (frames, 21, 3)
-        keypoints2d_right = np.array(keypoints2d_right)
+        # Read only first line from each file
+        with open(ap_keypoints_path_left, "r") as fl:
+            first_line_left = fl.readline()
+            keypoints2d_left = np.array(ujson.loads(first_line_left)).reshape(-1, 3)  # (21, 3)
+        with open(ap_keypoints_path_right, "r") as fr:
+            first_line_right = fr.readline()
+            keypoints2d_right = np.array(ujson.loads(first_line_right)).reshape(-1, 3)  # (21, 3)
 
-        # keypoint validity
+        # keypoint validity (for single frame now)
         valid_left = np.logical_not(
-            (keypoints2d_left[:, :, 0] == 0) &\
-                 (keypoints2d_left[:, :, 1] == 0) &\
-                     (keypoints2d_left[:, :, 2] == 1)
+            (keypoints2d_left[:, 0] == 0) &\
+                 (keypoints2d_left[:, 1] == 0) &\
+                     (keypoints2d_left[:, 2] == 1)
         )
         valid_left = np.logical_and(
             valid_left,
-            (keypoints2d_left[:, :, 0] < im_w) & (keypoints2d_left[:, :, 0] >= 0) & 
-            (keypoints2d_left[:, :, 1] < im_h) & (keypoints2d_left[:, :, 1] >= 0)
-        ) # (frames, 21)
+            (keypoints2d_left[:, 0] < im_w) & (keypoints2d_left[:, 0] >= 0) &
+            (keypoints2d_left[:, 1] < im_h) & (keypoints2d_left[:, 1] >= 0)
+        ) # (21,)
         valid_right = np.logical_not(
-            (keypoints2d_right[:, :, 0] == 0) &\
-                 (keypoints2d_right[:, :, 1] == 0) &\
-                     (keypoints2d_right[:, :, 2] == 1)
+            (keypoints2d_right[:, 0] == 0) &\
+                 (keypoints2d_right[:, 1] == 0) &\
+                     (keypoints2d_right[:, 2] == 1)
         )
         valid_right = np.logical_and(
             valid_right,
-            (keypoints2d_right[:, :, 0] < im_w) & (keypoints2d_right[:, :, 0] >= 0) & 
-            (keypoints2d_right[:, :, 1] < im_h) & (keypoints2d_right[:, :, 1] >= 0)
-        ) # (frames, 21)
+            (keypoints2d_right[:, 0] < im_w) & (keypoints2d_right[:, 0] >= 0) &
+            (keypoints2d_right[:, 1] < im_h) & (keypoints2d_right[:, 1] >= 0)
+        ) # (21,)
 
-        # save paths
-        mask_left_path = os.path.join(mask_left_dir, f"{cam_mapper[camname]}.npz")
-        mask_right_path = os.path.join(mask_right_dir, f"{cam_mapper[camname]}.npz")
+        # check if hands are detected
+        has_left_hand = valid_left.sum() > 5
+        has_right_hand = valid_right.sum() > 5
 
-        # when to give prompt
-        prompt_frame_l = None
-        prompt_frame_r = None
-        for i in range(len(orig_images)):
-            if valid_left[i].sum() > 0:
-                prompt_frame_l = i
-                break
-        for i in range(len(orig_images)):
-            if valid_right[i].sum() > 0:
-                prompt_frame_r = i
-                break
+        # Compute bounding boxes for cropping
+        bbox_left = None
+        bbox_right = None
+        if has_left_hand:
+            bbox_left = compute_hand_bbox(keypoints2d_left, valid_left, im_w, im_h, padding_ratio=0.3)
+        if has_right_hand:
+            bbox_right = compute_hand_bbox(keypoints2d_right, valid_right, im_w, im_h, padding_ratio=0.3)
 
-        # sam3: first frame
-        video_predictor = build_sam3_video_predictor(
-            checkpoint_path=args.sam_path
-        )
-        response = video_predictor.handle_request(
-            request=dict(
-                type="start_session",
-                resource_path=orig_images,  # a JPEG folder, an MP4 video file, or a list of PIL Image objects
-            )
-        )
-        session_id = response["session_id"]
-        response = video_predictor.handle_request(
-            request=dict(
-                type="add_prompt",
-                session_id=session_id,
-                frame_index=0,
-                text="background",
-            )
-        )
-        outputs_per_frame = propagate_in_video(video_predictor, session_id)
-        if prompt_frame_l is not None:
-            points_abs = keypoints2d_left[prompt_frame_l][valid_left[prompt_frame_l]][:, :2]  # (n_points, 2)
-            xmin, ymin = points_abs.min(axis=0)
-            xmax, ymax = points_abs.max(axis=0)
-            padding_x = int(0.1 * (xmax - xmin))
-            padding_y = int(0.1 * (ymax - ymin))
-            xmin = max(0, xmin - padding_x)
-            ymin = max(0, ymin - padding_y)
-            xmax = min(im_w - 1, xmax + padding_x)
-            ymax = min(im_h - 1, ymax + padding_y)
-            box = [xmin, ymin, xmax - xmin, ymax - ymin]
-            points_tensor_l = torch.tensor(
-                abs_to_rel_coords(points_abs.tolist(), im_w, im_h, coord_type="point"),
-                dtype=torch.float32,
-            )
-            box_tensor_l = torch.tensor(
-                abs_to_rel_coords([box], im_w, im_h, coord_type="box"),
-                dtype=torch.float32,
-            )
-            labels = np.array([1] * points_tensor_l.shape[0])
-            # if valid_left[prompt_frame_l][0]:
-            #     labels[0] = 0  # wrist as negative point
-            points_labels_tensor_l = torch.tensor(labels, dtype=torch.int32)
-            box_labels = np.array([1] * box_tensor_l.shape[0])
-            box_labels_tensor_l = torch.tensor(box_labels, dtype=torch.int32)
-        if prompt_frame_r is not None:
-            points_abs = keypoints2d_right[prompt_frame_r][valid_right[prompt_frame_r]][:, :2]
-            xmin, ymin = points_abs.min(axis=0)
-            xmax, ymax = points_abs.max(axis=0)
-            padding_x = int(0.1 * (xmax - xmin))
-            padding_y = int(0.1 * (ymax - ymin))
-            xmin = max(0, xmin - padding_x)
-            ymin = max(0, ymin - padding_y)
-            xmax = min(im_w - 1, xmax + padding_x)
-            ymax = min(im_h - 1, ymax + padding_y)
-            box = [xmin, ymin, xmax - xmin, ymax - ymin]
-            points_tensor_r = torch.tensor(
-                abs_to_rel_coords(points_abs.tolist(), im_w, im_h, coord_type="point"),
-                dtype=torch.float32,
-            )
-            box_tensor_r = torch.tensor(
-                abs_to_rel_coords([box], im_w, im_h, coord_type="box"),
-                dtype=torch.float32,
-            )
-            labels = np.array([1] * points_tensor_r.shape[0])
-            points_labels_tensor_r = torch.tensor(labels, dtype=torch.int32)
-            # if valid_right[prompt_frame_r][0]:
-            #     labels[0] = 0  # wrist as negative point
-            box_labels = np.array([1] * box_tensor_r.shape[0])
-            box_labels_tensor_r = torch.tensor(box_labels, dtype=torch.int32)
-        if prompt_frame_l is not None:
-            if prompt_frame_r is not None:
-                points_tensor = torch.cat([points_tensor_l, points_tensor_r], dim=0)
-                neg_labels = torch.tensor([0] * points_tensor_r.shape[0], dtype=torch.int32)
-                points_labels_tensor = torch.cat([points_labels_tensor_l, neg_labels], dim=0)
-            else:
-                points_tensor = points_tensor_l
-                points_labels_tensor = points_labels_tensor_l
-            response = video_predictor.handle_request(
-                request=dict(
-                    type="add_prompt",
-                    session_id=session_id,
-                    frame_index=prompt_frame_l,
-                    points=points_tensor,
-                    point_labels=points_labels_tensor,
-                    # bounding_boxes=box_tensor_l,
-                    # bounding_box_labels=box_labels_tensor_l,
-                    # text="hand"
-                    obj_id=1,
-                )
-            )
-        if prompt_frame_r is not None:
-            if prompt_frame_l is not None:
-                points_tensor = torch.cat([points_tensor_r, points_tensor_l], dim=0)
-                neg_labels = torch.tensor([0] * points_tensor_l.shape[0], dtype=torch.int32)
-                points_labels_tensor = torch.cat([points_labels_tensor_l, neg_labels], dim=0)
-            else:
-                points_tensor = points_tensor_r
-                points_labels_tensor = points_labels_tensor_r
-            response = video_predictor.handle_request(
-                request=dict(
-                    type="add_prompt",
-                    session_id=session_id,
-                    frame_index=prompt_frame_r,
-                    points=points_tensor,
-                    point_labels=points_labels_tensor,
-                    # bounding_boxes=box_tensor_r,
-                    # bounding_box_labels=box_labels_tensor_r,
-                    # text="hand",
-                    obj_id=2,
-                )
-            )
+        # Initialize combined mask (0=empty, 1=left hand, 2=right hand)
+        combined_mask = np.zeros((im_h, im_w), dtype=np.uint8)
 
-        # sam3: propagate
-        outputs_per_frame = propagate_in_video(video_predictor, session_id)
-        vis_per_frame = prepare_masks_for_visualization(outputs_per_frame)
+        # Track segmentation success
+        left_segmented = False
+        right_segmented = False
 
-        # save
-        save_mask_left = np.zeros((len(orig_imgs), im_h, im_w), dtype=bool)
-        save_mask_right = np.zeros((len(orig_imgs), im_h, im_w), dtype=bool)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        vis_path = os.path.join(vis_dir, f"{cam_mapper[camname]}.mp4")
-        video_writer = cv2.VideoWriter(vis_path, fourcc, 30, (600, 400))
-        n_written = 0
-        for frame_idx in tqdm(range(len(outputs_per_frame)), desc="Saving "):
-            obj_ids = list(outputs_per_frame[frame_idx].keys())
-            if 1 in obj_ids:
-                mask_left = outputs_per_frame[frame_idx][1]
-                save_mask_left[exist_ids[frame_idx], ...] = mask_left
-            if 2 in obj_ids:
-                mask_right = outputs_per_frame[frame_idx][2]
-                save_mask_right[exist_ids[frame_idx], ...] = mask_right
-            # visualize
-            fig = visualize_formatted_frame_output(
-                frame_idx,
-                orig_images,
-                outputs_list=[vis_per_frame],
-                figsize=(6, 4),
-            )
-            while n_written < exist_ids[frame_idx]:
-                video_writer.write(np.ones((400, 600, 3), dtype=np.uint8)*255)
-                n_written += 1
-            fig.canvas.draw()
-            video_writer.write(np.array(fig.canvas.buffer_rgba())[..., :3][..., ::-1])
-            fig.clf()
-            plt.close(fig)
-            n_written += 1
-        np.savez_compressed(mask_left_path, *save_mask_left)
-        np.savez_compressed(mask_right_path, *save_mask_right)
-        print(f"Saved {mask_left_path} and {mask_right_path}")
+        # Process left hand
+        if has_left_hand and bbox_left is not None:
+            # Crop image around left hand
+            cropped_left, bbox_l = crop_image(orig_img, bbox_left)
 
-        # clean up
-        _ = video_predictor.handle_request(
-            request=dict(
-                type="close_session",
-                session_id=session_id,
-            )
-        )
-        del video_predictor
-        gc.collect()
-        torch.cuda.empty_cache()
-        video_writer.release()
-    
-    # collage
-    if args.v_idx is None or args.collage_only:
-        vis_paths = sorted(glob.glob(os.path.join(vis_dir, "brics*.mp4")))
-        video_handlers = [cv2.VideoCapture(pth) for pth in vis_paths]
-        for v_idx, v_handler in enumerate(video_handlers):
-            if not v_handler.isOpened():
-                raise IOError(f"Cannot open video {vis_paths[v_idx]}")
-        collage_path = os.path.join(
-            output_path, "mask_2d", "vis_"+str(selected_vid_idx).zfill(3)+".mp4"
-        )
-        row, col = get_row_col(len(video_handlers), square=False)
-        im_h = 400
-        im_w = 600
-        if im_h > im_w and len(video_handlers) == 3:
-            row, col = 1, 3
-        collage_h = im_h * row
-        collage_w = im_w * col
-        min_height = 1000
-        if collage_h > min_height:
-            scale = min_height / collage_h
-            collage_h = int(collage_h * scale)
-            collage_w = int(collage_w * scale)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        collage_handler = cv2.VideoWriter(collage_path, fourcc, 30, (collage_w, collage_h))
-        flag = True
-        while True:
-            imgs = []
-            for v_handler in video_handlers:
-                ret, frame = v_handler.read()
-                if not ret:
-                    flag = False
-                    break
-                imgs.append(frame)
-            if not flag:
-                break
-            collaged = merge(imgs, resize=True)
-            collage_handler.write(collaged)
-        collage_handler.release()
-        print(f"Saved {collage_path}")
+            # Set image and prompt with text (reuse processor)
+            inference_state = processor.set_image(cropped_left)
+            output = processor.set_text_prompt(state=inference_state, prompt="hand")
 
-        # delete individual videos
-        for v_handler in video_handlers:
-            v_handler.release()
-        time.sleep(0.1)
-        shutil.rmtree(vis_dir)
+            # Extract mask
+            if output and 'masks' in output:
+                # Get the mask with highest score
+                masks = output['masks'].detach().cpu().numpy()[:, 0, ...]  # (num_preds, obj, H, W)
+                scores = output['scores'].detach().cpu().numpy() if 'scores' in output else None
+
+                if scores is not None and len(scores) > 0:
+                    best_mask_idx = np.argmax(scores)
+                    cropped_mask = masks[best_mask_idx]
+                else:
+                    cropped_mask = masks[0] if len(masks) > 0 else None
+
+                if cropped_mask is not None:
+                    # Paste mask back to original image coordinates (mark as 1 for left hand)
+                    combined_mask[bbox_left[1]:bbox_left[3], bbox_left[0]:bbox_left[2]][cropped_mask > 0] = 1
+                    left_segmented = True
+
+        # Process right hand
+        if has_right_hand and bbox_right is not None:
+            # Crop image around right hand
+            cropped_right, bbox_r = crop_image(orig_img, bbox_right)
+
+            # Set image and prompt with text (reuse processor)
+            inference_state = processor.set_image(cropped_right)
+            output = processor.set_text_prompt(state=inference_state, prompt="hand")
+
+            # Extract mask
+            if output and 'masks' in output:
+                # Get the mask with highest score
+                masks = output['masks'].detach().cpu().numpy()[:, 0, ...]
+                scores = output['scores'].detach().cpu().numpy() if 'scores' in output else None
+
+                if scores is not None and len(scores) > 0:
+                    best_mask_idx = np.argmax(scores)
+                    cropped_mask = masks[best_mask_idx]
+                else:
+                    cropped_mask = masks[0] if len(masks) > 0 else None
+
+                if cropped_mask is not None:
+                    # Paste mask back to original image coordinates (mark as 2 for right hand)
+                    combined_mask[bbox_right[1]:bbox_right[3], bbox_right[0]:bbox_right[2]][cropped_mask > 0] = 2
+                    right_segmented = True
+
+        # Store mask and segmentation status
+        all_masks[camname] = combined_mask
+        seg_status[f"{camname}_left"] = left_segmented
+        seg_status[f"{camname}_right"] = right_segmented
+
+        # Store for collage - create a combined visualization with both hands
+        mask_left = (combined_mask == 1)
+        mask_right = (combined_mask == 2)
+        fig_collage, ax_collage = plt.subplots(1, 1, figsize=(8, 6))
+        ax_collage.imshow(orig_img)
+        if left_segmented:
+            ax_collage.imshow(mask_left, alpha=0.4, cmap='Reds')
+        if right_segmented:
+            ax_collage.imshow(mask_right, alpha=0.4, cmap='Blues')
+        ax_collage.set_title(f"{cam_mapper[camname]}")
+        ax_collage.axis('off')
+
+        # Convert figure to numpy array for collage
+        fig_collage.tight_layout()
+        fig_collage.canvas.draw()
+        collage_img = np.frombuffer(fig_collage.canvas.tostring_rgb(), dtype=np.uint8)
+        collage_img = collage_img.reshape(fig_collage.canvas.get_width_height()[::-1] + (3,))
+        collage_images.append(collage_img)
+        collage_camnames.append(cam_mapper[camname])
+        plt.close(fig_collage)
+
+    # Save all masks and segmentation status to a single npz file
+    mask_save_path = os.path.join(mask_dir, "hand_masks.npz")
+    save_dict = {}
+    # Add all masks
+    for cam_name, mask in all_masks.items():
+        save_dict[cam_name] = mask
+    # Add segmentation status
+    for status_key, status_val in seg_status.items():
+        save_dict[status_key] = status_val
+
+    np.savez_compressed(mask_save_path, **save_dict)
+    print(f"\nSaved all masks to {mask_save_path}")
+    print(f"  - {len(all_masks)} camera views")
+    print(f"  - Segmentation status saved for each hand")
+
+    # Clean up SAM3 model after processing all images
+    del model, processor
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    # Create collage of all camera views
+    if len(collage_images) > 0:
+        print(f"\nCreating collage with {len(collage_images)} camera views...")
+
+        # Use easymocap's get_row_col to determine grid layout
+        nrows, ncols = get_row_col(len(collage_images), square=False)
+
+        # Create grid collage
+        fig_grid, axes_grid = plt.subplots(nrows, ncols, figsize=(ncols * 6, nrows * 4.5))
+        if nrows == 1 and ncols == 1:
+            axes_grid = np.array([[axes_grid]])
+        elif nrows == 1 or ncols == 1:
+            axes_grid = axes_grid.reshape(nrows, ncols)
+
+        for idx in range(nrows * ncols):
+            row = idx // ncols
+            col = idx % ncols
+            ax = axes_grid[row, col]
+
+            if idx < len(collage_images):
+                ax.imshow(collage_images[idx])
+            ax.axis('off')
+
+        plt.tight_layout()
+        collage_path = os.path.join(output_path, "mask_2d", f"collage_{str(selected_vid_idx).zfill(3)}.png")
+        plt.savefig(collage_path, dpi=150, bbox_inches='tight')
+        plt.close(fig_grid)
+        print(f"Saved collage: {collage_path}")

@@ -15,3 +15,4 @@ ignore_camera.txt
 _DATA/
 sbatch_err/
 sbatch_out/
+debug*.png

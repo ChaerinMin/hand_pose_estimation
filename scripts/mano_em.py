@@ -89,6 +89,7 @@ parser.add_argument(
 parser.add_argument('--model', type=str, default='smpl', choices=['smpl', 'smplh', 'smplx', 'manol', 'manor'])
 parser.add_argument("--optimize_bad_views", action="store_true", help="Whether to optimize extrinsics of bad views")
 parser.add_argument('--gender', type=str, default='neutral', choices=['neutral', 'male', 'female'])
+parser.add_argument("--refine_shape_with_mask", action="store_true", help="Refine MANO shape parameters using hand masks")
 parser.add_argument('--save_origin', action='store_true')
 parser.add_argument('--verbose', action='store_true')
 parser.add_argument('--opts', help="Modify config options using the command-line", 
@@ -274,6 +275,40 @@ for selected_vid_idx in selected_vid_idxs:
                 keypoints3d_right.append(np.array(ujson.loads(liner)).reshape(-1, 4))
     keypoints3d_left = np.asarray(keypoints3d_left)
     keypoints3d_right = np.asarray(keypoints3d_right)
+
+    # load hand masks if refine_shape_with_mask is enabled
+    hand_masks = None
+    seg_status = {}
+    if args.refine_shape_with_mask:
+        mask_dir = os.path.join(output_path, "mask_2d", str(selected_vid_idx).zfill(3))
+        mask_path = os.path.join(mask_dir, "hand_masks.npz")
+        if os.path.exists(mask_path):
+            print(f"Loading hand masks from {mask_path}")
+            mask_data = np.load(mask_path)
+            hand_masks = {}
+            # Load masks for each camera
+            for cam in cur_cam_names:
+                if cam in cam_mapper and cam in mask_data:
+                    hand_masks[cam] = mask_data[cam]
+                    # Load segmentation status
+                    seg_status[f"{cam}_left"] = bool(mask_data.get(f"{cam}_left", False))
+                    seg_status[f"{cam}_right"] = bool(mask_data.get(f"{cam}_right", False))
+            print(f"  - Loaded masks for {len(hand_masks)} cameras")
+            print(f"  - Segmentation status: {sum(seg_status.values())} successful segmentations")
+
+            # Assert that all views have the first frame available
+            if use_parsed:
+                multiseq_dir = args.out_dir[:args.out_dir.index("calib")]
+                parsed_dir = os.path.join(multiseq_dir, "parsed")
+                first_frame = chosen_frames[0]
+                timestamp_dir = os.path.join(parsed_dir, f"timestamp_{first_frame}", "images")
+                for cam in cur_cam_names:
+                    if cam in cam_mapper:
+                        frame_path = os.path.join(timestamp_dir, f"{cam}.jpg")
+                        assert os.path.exists(frame_path), f"Is this bootstarp sequence? Missing frame detected."
+                print(f"  - Verified all {len(cur_cam_names)} cameras have first frame available")
+        else:
+            raise FileNotFoundError(f"Hand masks not found at {mask_path}. Please run mask_2d.py first.")
     
     # mano model
     with Timer('Loading {}, {}'.format(args.model, args.gender), not False):
@@ -311,7 +346,9 @@ for selected_vid_idx in selected_vid_idxs:
         # keypoints -> mano parameters
         weight_pose = {
             'k3d': 1e2, 'k2d': 2e-3,
-            'reg_poses': 1e-3, 'smooth_body': 1e2, 'smooth_poses': 1e2,
+            # 'reg_poses': 1e-3, 'smooth_body': 1e2, 'smooth_poses': 1e2,
+            'reg_poses': 5e-5, 'smooth_body': 1e1, 'smooth_poses': 5.0,
+            # 'reg_poses': 0.0, 'smooth_body': 0.0, 'smooth_poses': 0.0
         }
         # Estimate global scale for observed keypoints -> model units and create scaled copies
         s_right = estimate_scale_from_keypoints(body_model_right, keypoints3d_right, kintree=dataset_config.get('kintree', None))
@@ -331,10 +368,32 @@ for selected_vid_idx in selected_vid_idxs:
                 config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose
             )
         else:
-            params_right = smpl_from_keypoints3d(body_model_right, keypoints3d_right_scaled, 
-                config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose)
-            params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left_scaled, 
-                config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose)
+            params_right = smpl_from_keypoints3d(body_model_right, keypoints3d_right_scaled,
+                config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 1e2}, weight_pose=weight_pose) # 5e3
+            params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left_scaled,
+                config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 1e2}, weight_pose=weight_pose)
+
+        # refine shape with hand masks if enabled
+        if args.refine_shape_with_mask and hand_masks is not None:
+            print('Refining MANO shape parameters with hand masks...')
+            from src.utils.mask_optimize import refine_shape_with_mask
+
+            # Refine right hand
+            params_right = refine_shape_with_mask(
+                body_model_right, params_right, hand_masks, cameras,
+                cur_cam_names, cam_mapper, intrs, final_scale_right, keypoints3d_right[0], hand_side="right",
+                # weight_loss={'mask': 1e4, 'reg_shapes': 1e1, 'init_shape': 5e1},  # 1e3 1e2 5e2
+                weight_loss={'mask': 1e4, 'reg_shapes': 0.5, 'init_shape': 0.0},  # 1e3 1e2 5e2
+                max_iter=20, verbose=True
+            )
+
+            # Refine left hand
+            params_left = refine_shape_with_mask(
+                body_model_left, params_left, hand_masks, cameras,
+                cur_cam_names, cam_mapper, intrs, final_scale_left, keypoints3d_left[0], hand_side="left",
+                weight_loss={'mask': 1e4, 'reg_shapes': 0.5, 'init_shape': 0.0},
+                max_iter=20, verbose=True
+            )
 
         # smooth mano parameters
         if args.to_smooth:

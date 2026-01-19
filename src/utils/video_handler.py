@@ -13,14 +13,14 @@ def frame_preprocess(path, use_parsed, args, intr=None, dist_intr=None, dist=Non
         data_root = args.out_dir[:multiseq_chr]
         parsed_dir = os.path.join(data_root, multiseq, "parsed")
         timestamp_dirs = natsort.natsorted(glob.glob(os.path.join(parsed_dir, "timestamp_*")))
-        datalen = min(100, len(timestamp_dirs))
+        datalen = min(300, len(timestamp_dirs))
     else:
         stream = cv2.VideoCapture(path)
         assert stream.isOpened(), 'Cannot capture source'
         datalen = int(stream.get(cv2.CAP_PROP_FRAME_COUNT))
 
     orig_imgs = []
-    im_names = []    
+    im_names = []
     frame_num = 0
     for k in range(datalen):
         if k % 3 == 0 or k % 3 == 1 or k % 3 == 2:
@@ -48,6 +48,47 @@ def frame_preprocess(path, use_parsed, args, intr=None, dist_intr=None, dist=Non
         stream.release()
 
     return im_names, orig_imgs, H, W
+
+def load_first_frame(path, use_parsed, args, intr=None, dist_intr=None, dist=None):
+    """Load only the first frame from a video or parsed directory
+
+    Returns:
+        orig_img: numpy array of the first frame
+        im_h: image height
+        im_w: image width
+    """
+    if use_parsed:
+        cam_name = os.path.basename(path).split('.')[0][:21]
+        multiseq_chr = args.out_dir.index("multisequence")
+        multiseq = args.out_dir[multiseq_chr:multiseq_chr+19]
+        data_root = args.out_dir[:multiseq_chr]
+        parsed_dir = os.path.join(data_root, multiseq, "parsed")
+        timestamp_dirs = natsort.natsorted(glob.glob(os.path.join(parsed_dir, "timestamp_*")))
+
+        # Load first valid frame
+        for k in range(len(timestamp_dirs)):
+            img_path = os.path.join(timestamp_dirs[k], "images", f"{cam_name}.jpg")
+            # if os.path.exists(img_path):
+            frame = np.array(Image.open(img_path))
+            H, W, _ = frame.shape
+            return frame, H, W
+        raise ValueError(f"No valid frames found in {parsed_dir}")
+    else:
+        stream = cv2.VideoCapture(path)
+        assert stream.isOpened(), 'Cannot capture source'
+
+        grabbed, frame = stream.read()
+        if not grabbed:
+            stream.release()
+            raise ValueError(f"Cannot read first frame from {path}")
+
+        if args.undistort and not (dist == 0).all():
+            frame = cv2.undistort(frame, intr, dist, None, dist_intr)
+
+        H, W, _ = frame.shape
+        stream.release()
+
+        return frame, H, W
 
 def create_video_writer(filename, frame_size, fps=30):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec for MP4
