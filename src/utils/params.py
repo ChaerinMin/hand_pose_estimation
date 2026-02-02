@@ -67,7 +67,14 @@ def get_extr(param):
     return extr
 
 
-def read_params(params_path, distortion):
+def read_params(params_path, distortion, args):
+    if args.setting == "brics-mini":
+        cam_name_dtype = "<U22"
+    elif args.setting == "brics-studio":
+        cam_name_dtype = "<U18"
+    else:
+        cam_name_dtype = None
+        raise NotImplementedError
     if distortion:
         params = np.loadtxt(
             params_path,
@@ -83,7 +90,7 @@ def read_params(params_path, distortion):
                 ("k2", float),
                 ("p1", float),
                 ("p2", float),
-                ("cam_name", "<U22"),
+                ("cam_name", cam_name_dtype),
                 ("qvecw", float),
                 ("qvecx", float),
                 ("qvecy", float),
@@ -104,7 +111,7 @@ def read_params(params_path, distortion):
                 ("fy", float),
                 ("cx", float),
                 ("cy", float),
-                ("cam_name", "<U22"),
+                ("cam_name", cam_name_dtype),
                 ("qvecw", float),
                 ("qvecx", float),
                 ("qvecy", float),

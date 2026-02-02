@@ -94,6 +94,7 @@ parser.add_argument('--save_origin', action='store_true')
 parser.add_argument('--verbose', action='store_true')
 parser.add_argument('--opts', help="Modify config options using the command-line", 
     default={}, nargs='+')
+parser.add_argument("--setting", type=str, choices=["brics-mini", "brics-studio", "brics-mobile"])
 recon = parser.add_argument_group('Reconstruction control')
 recon.add_argument('--robust3d', action='store_true')
 # visualization
@@ -123,10 +124,10 @@ assert os.path.exists(params_path)
 
 # filter out some cameras
 if "stage1" in args.out_dir:
-    params = param_utils.read_params(params_path, distortion=True)
+    params = param_utils.read_params(params_path, distortion=True, args=args)
     use_parsed = False
 elif "stage2" in args.out_dir:
-    params = param_utils.read_params(params_path, distortion=False)
+    params = param_utils.read_params(params_path, distortion=False, args=args)
     use_parsed = True
 else:
     raise ValueError("Cannot determine whether to assume undistorted.")

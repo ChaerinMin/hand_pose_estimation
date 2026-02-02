@@ -2,6 +2,7 @@ from argparse import ArgumentParser
 
 def add_common_args(parser: ArgumentParser):
     parser.add_argument("--root_dir", "-r", required=False, type=str)
+    parser.add_argument("--video_dir", "-v", type=str, required=False, help="folder where video directories are stored. only for cam name reading purpose.")
     parser.add_argument("--out_dir", "-o", required=False, type=str, help="Output directory")
     parser.add_argument("--input_type", "-t", default="video", choices=["video", "image"], help="Whether the input is a video or set of images")
     parser.add_argument("--seq_path", "-s", type=str, required=False)

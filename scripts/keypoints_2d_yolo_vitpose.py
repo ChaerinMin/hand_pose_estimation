@@ -171,6 +171,7 @@ def main():
     parser.add_argument('--remove_side_cam', type=bool, default=True, help='Remove Side Cameras')
     parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove Bottom Cameras')
     parser.add_argument('--use_hamer', type=bool, default=False, help='YOLO -> ViTPose -> Hamer pipeline')
+    parser.add_argument("--setting", type=str, choices=["brics-mini", "brics-studio", "brics-mobile"])
     args = parser.parse_args()
     os.system("module load ffmpeg")
 
@@ -195,10 +196,10 @@ def main():
 
     params_path = os.path.join(args.out_dir, params_txt)
     if "stage1" in args.out_dir:
-        params = param_utils.read_params(params_path, distortion=True)
+        params = param_utils.read_params(params_path, distortion=True, args=args)
         use_parsed = False
     elif "stage2" in args.out_dir:
-        params = param_utils.read_params(params_path, distortion=False)
+        params = param_utils.read_params(params_path, distortion=False, args=args)
         use_parsed = True
     else:
         raise ValueError("Cannot determine whether to assume undistorted.")
@@ -215,7 +216,11 @@ def main():
     for cam in cams_to_remove:
         if cam in cam_names:
             cam_names.remove(cam)
-    cam_mapper = map_camera_names(input_path, cam_names)
+    if args.video_dir:
+        video_dir = os.path.join(args.video_dir, args.seq_path)
+    else:
+        video_dir = input_path
+    cam_mapper = map_camera_names(video_dir, cam_names)
 
     if args.ith == -1:
         total_video_idxs = 0

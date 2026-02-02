@@ -40,13 +40,11 @@ BOTTOM_BOTTOM_CAMERAS = [ # camera at the bottom
 def removed_cameras(remove_side=False, remove_bottom=False, ignored_cameras=None):
     to_remove = []
     if ignored_cameras:
-        IGNORE_CAMERAS = ignored_cameras
-    else:
-        IGNORE_CAMERAS = []
+        to_remove.extend(ignored_cameras)
     if remove_side:
-        to_remove = to_remove + SIDE_CAMERAS + IGNORE_CAMERAS
+        to_remove.extend(SIDE_CAMERAS)
     if remove_bottom:
-        to_remove = to_remove + BOTTOM_SIDE_CAMERAS + IGNORE_CAMERAS
+        to_remove.extend(BOTTOM_SIDE_CAMERAS)
     return to_remove
 
 def map_camera_names(base_dir, name_list):

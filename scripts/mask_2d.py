@@ -114,6 +114,7 @@ parser.add_argument(
     "--collage_only", action="store_true",
     help="If true, only create the collage video from existing per-camera videos"
 )
+parser.add_argument("--setting", type=str, choices=["brics-mini", "brics-studio", "brics-mobile"])
 args = parser.parse_args()
 
 # paths
@@ -128,10 +129,10 @@ else:
     params_txt = "params.txt"
 params_path = os.path.join(args.out_dir, params_txt)
 if "stage1" in args.out_dir:
-    params = param_utils.read_params(params_path, distortion=True)
+    params = param_utils.read_params(params_path, distortion=True, args=args)
     use_parsed = False
 elif "stage2" in args.out_dir:
-    params = param_utils.read_params(params_path, distortion=False)
+    params = param_utils.read_params(params_path, distortion=False, args=args)
     use_parsed = True
 else:
     raise ValueError("Cannot determine whether to assume undistorted.")

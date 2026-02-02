@@ -6,8 +6,14 @@ import natsort
 from PIL import Image
 
 def frame_preprocess(path, use_parsed, args, intr=None, dist_intr=None, dist=None):
+    if args.setting == "brics-mini":
+        cam_name_slicer = slice(0, 21)
+    elif args.setting == "brics-studio":
+        cam_name_slicer = slice(0,18)
+    else:
+        raise NotImplementedError()
     if use_parsed:
-        cam_name = os.path.basename(path).split('.')[0][:21]
+        cam_name = os.path.basename(path).split('.')[0][cam_name_slicer]
         multiseq_chr = args.out_dir.index("multisequence")
         multiseq = args.out_dir[multiseq_chr:multiseq_chr+19]
         data_root = args.out_dir[:multiseq_chr]
@@ -57,8 +63,14 @@ def load_first_frame(path, use_parsed, args, intr=None, dist_intr=None, dist=Non
         im_h: image height
         im_w: image width
     """
+    if args.setting == "brics-mini":
+        cam_name_slicer = slice(0, 21)
+    elif args.setting == "brics-studio":
+        cam_name_slicer = slice(0,18)
+    else:
+        raise NotImplementedError()
     if use_parsed:
-        cam_name = os.path.basename(path).split('.')[0][:21]
+        cam_name = os.path.basename(path).split('.')[0][cam_name_slicer]
         multiseq_chr = args.out_dir.index("multisequence")
         multiseq = args.out_dir[multiseq_chr:multiseq_chr+19]
         data_root = args.out_dir[:multiseq_chr]
