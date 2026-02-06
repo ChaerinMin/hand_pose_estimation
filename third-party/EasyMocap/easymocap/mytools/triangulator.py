@@ -182,10 +182,14 @@ def iterative_triangulate(kpts2d, RT, previous=None,
             kpts2d[nottrack] = 0.
             if debug:
                 log('[triangulate] Remove with track {}'.format(np.where(nottrack)))
+    print("\nStart RANSAC:")
     while True:
         # 0. triangulate and project
         kpts3d = batch_triangulate(kpts2d, RT, min_view=min_view)
         dist, conf = project_and_distance(kpts3d, RT, kpts2d)
+        # alive = (kpts3d != 0).all(axis=-1)
+        # if alive.sum() > 0:
+        #     print(f"Avg reprojection error: {np.mean(dist[:, alive])}")
         # 2. find the outlier
         vv, jj = np.where(dist > dist_max)
         if vv.shape[0] < 1:
@@ -207,8 +211,8 @@ def iterative_triangulate(kpts2d, RT, previous=None,
         if debug:
             log('[triangulate] Directly remove {}, {}'.format(vv, jj))
         kpts2d[vv, jj, -1] = 0.
-    if debug:
-        log('[triangulate] finally {} valid points'.format((kpts3d[..., -1]>0).sum()))
+    # if debug:
+    log('[triangulate] finally {} valid points'.format((kpts3d[..., -1]>0).sum()))
     if (kpts3d[..., -1]>0).sum() < min_joints:
         kpts3d[..., -1] = 0.
         kpts2d[..., -1] = 0.

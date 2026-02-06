@@ -65,7 +65,7 @@ class SimpleTriangulate:
             pelvis_undis.append(pelvis)
         return pelvis_undis
 
-    def __call__(self, keypoints, cameras):
+    def __call__(self, keypoints, cameras, min_conf=0.1, min_view=3, dist_max=25, thres_outlier_view=0.4, thres_outlier_joint=0.4):
         '''
             keypoints: [nViews, nJoints, 3]
         
@@ -77,7 +77,7 @@ class SimpleTriangulate:
         if self.mode == 'naive':
             keypoints3d = batch_triangulate(keypoints, cameras['P'])
         else:
-            keypoints3d, k2d = iterative_triangulate(keypoints, cameras['P'], dist_max=25)
+            keypoints3d, k2d = iterative_triangulate(keypoints, cameras['P'], dist_max=dist_max, min_conf=min_conf, min_view=min_view, thres_outlier_view=thres_outlier_view, thres_outlier_joint=thres_outlier_joint)
         return {'keypoints3d': keypoints3d}
 
 class RobustTriangulate(SimpleTriangulate):

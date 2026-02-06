@@ -209,13 +209,40 @@
                 "--ith", "0",
                 "--start", "0",
                 "--end", "-1",
-                "--use_optim_params",
+                // "--use_optim_params",
                 // "--no_refine",
                 "--setting", "brics-studio",
                 "--vis",
                 // "--vis_only",
                 "--batch_size", "1024"
             ]
-        }
+        },
+        {
+            "name": "Full Body 3D Triangulation",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "module": "scripts_body.keypoints_3d_fast",
+            "justMyCode": false,
+            "args":[
+                "-r", "/oscar/data/ssrinath/public/brics-studio",
+                "-v", "/oscar/data/ssrinath/brics/non-pii/brics-studio",
+                "-s", "2025-03-30",
+                "-o", "/oscar/data/ssrinath/public/brics-studio/2025-03-30/multisequence000001/calib/stage2/sparse/0",
+                "--ith", "0",
+                "--start", "0",
+                "--end", "-1",
+                // "--anchor_camera", "brics-odroid-002_cam0",
+                // "--undistort",
+                "--all_frames",
+                "--easymocap",
+                "--to_smooth",
+                // "--use_optim_params",
+                "--setting", "brics-studio",
+                "--vis_repro",
+                // "--confidence_thresh", "100",
+                // "--optimize_bad_views",
+            ]   
+        },
     ]
 }
