@@ -78,8 +78,12 @@ def get_rgb(index):
     elif isinstance(index, str):
         col = colors_table.get(index, (1, 0, 0))
         col = tuple([int(c*255) for c in col[::-1]])
+    elif isinstance(index, list):
+        if max(index) > 1.0:  # not normalized
+            index = [uint / 255 for uint in index]
+        col = index
     else:
-        raise TypeError('index should be int or str')
+        raise TypeError('index should be int, str, or list')
     return col
 
 def get_rgb_01(index):
@@ -148,12 +152,14 @@ def plot_keypoints(img, points, pid, config, vis_conf=False, use_limb_color=True
             x = W - x
         c = points[i][-1]
         if c > 0.01:
-            text_size = img.shape[0]/1000
+            text_size = img.shape[0]/1000 * 3
             col = get_rgb(pid)
             radius = int(lw/1.5)
             if i > 25 and config['nJoints'] != 42:
                 radius = max(int(radius/4), 1)
             cv2.circle(img, (int(x+0.5), int(y+0.5)), radius, col, -1)
+            # if i < 18:
+            #     cv2.putText(img, str(i), (int(x), int(y)), cv2.FONT_HERSHEY_SIMPLEX, text_size, col, 2)
             if vis_conf:
                 cv2.putText(img, '{:.1f}'.format(c), (int(x), int(y)), 
                 cv2.FONT_HERSHEY_SIMPLEX, text_size, col, 2)
