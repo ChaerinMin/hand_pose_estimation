@@ -16,3 +16,6 @@ _DATA/
 sbatch_err/
 sbatch_out/
 debug*.png
+debug*.ply
+brics-mini
+brics-studio

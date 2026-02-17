@@ -86,11 +86,15 @@ def main():
         params_txt = "optim_params.txt"
     else:
         params_txt = "params.txt"
-    params_path = os.path.join(args.out_dir, params_txt)
-    if "stage1" in args.out_dir:
+    calib_dir = os.path.join(
+        args.root_dir, args.seq_path, args.multisequence,
+        "calib", f"stage{args.stage}", "sparse", "0"
+    )
+    params_path = os.path.join(calib_dir, params_txt)
+    if args.stage == 1:
         params = param_utils.read_params(params_path, distortion=True, args=args)
         use_parsed = False
-    elif "stage2" in args.out_dir:
+    elif args.stage == 2:
         params = param_utils.read_params(params_path, distortion=False, args=args)
         use_parsed = True
     else:
@@ -99,7 +103,7 @@ def main():
     # cam names
     cam_names = list(params[:]["cam_name"])
     cam_names = [c.replace(".", "") for c in cam_names]
-    removed_camera_path = os.path.join(args.out_dir, 'ignore_camera.txt')
+    removed_camera_path = os.path.join(calib_dir, 'ignore_camera.txt')
     if os.path.isfile(removed_camera_path):
         with open(removed_camera_path) as file:
             ignored_cameras = [line.rstrip() for line in file]
@@ -109,7 +113,11 @@ def main():
     for cam in cams_to_remove:
         if cam in cam_names:
             cam_names.remove(cam)
-    cam_mapper = map_camera_names(input_path, cam_names)
+    if args.video_dir:
+        video_dir = os.path.join(args.video_dir, args.seq_path)
+    else:
+        video_dir = input_path
+    cam_mapper = map_camera_names(video_dir, cam_names)
 
     # which video
     if args.ith == -1:
@@ -155,7 +163,7 @@ def main():
         os.makedirs(output_kps_right_path, exist_ok=True)
         os.makedirs(output_bbx_right_path, exist_ok=True)
 
-        reader = Reader(args.input_type, input_path, cam_names=cam_names, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
+        reader = Reader(args.input_type, video_dir, cam_names=cam_names, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
         if reader.frame_count <= 0:
             continue
         

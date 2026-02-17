@@ -14,12 +14,16 @@ def frame_preprocess(path, use_parsed, args, intr=None, dist_intr=None, dist=Non
         raise NotImplementedError()
     if use_parsed:
         cam_name = os.path.basename(path).split('.')[0][cam_name_slicer]
-        multiseq_chr = args.out_dir.index("multisequence")
-        multiseq = args.out_dir[multiseq_chr:multiseq_chr+19]
-        data_root = args.out_dir[:multiseq_chr]
-        parsed_dir = os.path.join(data_root, multiseq, "parsed")
+        # multiseq_chr = args.out_dir.index("multisequence")
+        # multiseq = args.out_dir[multiseq_chr:multiseq_chr+19]
+        # data_root = args.out_dir[:multiseq_chr]
+        parsed_dir = os.path.join(args.root_dir, args.seq_path, args.multisequence, "parsed")
         timestamp_dirs = natsort.natsorted(glob.glob(os.path.join(parsed_dir, "timestamp_*")))
-        datalen = min(300, len(timestamp_dirs))
+        if args.len_timestep > 0:
+            datalen = args.len_timestep
+        else:
+            datalen = len(timestamp_dirs)
+        # datalen = min(args.len_timestep, len(timestamp_dirs))
     else:
         stream = cv2.VideoCapture(path)
         assert stream.isOpened(), 'Cannot capture source'
@@ -71,10 +75,11 @@ def load_first_frame(path, use_parsed, args, intr=None, dist_intr=None, dist=Non
         raise NotImplementedError()
     if use_parsed:
         cam_name = os.path.basename(path).split('.')[0][cam_name_slicer]
-        multiseq_chr = args.out_dir.index("multisequence")
-        multiseq = args.out_dir[multiseq_chr:multiseq_chr+19]
-        data_root = args.out_dir[:multiseq_chr]
-        parsed_dir = os.path.join(data_root, multiseq, "parsed")
+        # multiseq_chr = args.out_dir.index("multisequence")
+        # multiseq = args.out_dir[multiseq_chr:multiseq_chr+19]
+        # data_root = args.out_dir[:multiseq_chr]
+        # parsed_dir = os.path.join(data_root, multiseq, "parsed")
+        parsed_dir = os.path.join(args.root_dir, args.seq_path, args.multisequence, "parsed")
         timestamp_dirs = natsort.natsorted(glob.glob(os.path.join(parsed_dir, "timestamp_*")))
 
         # Load first valid frame

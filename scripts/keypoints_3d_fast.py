@@ -37,23 +37,25 @@ args = parser.parse_args()
 base_path = os.path.join(args.root_dir)
 image_base = os.path.join(base_path, args.seq_path)
 # image_base = os.path.join(base_path)
-output_path = args.out_dir
 # Loads the camera parameters
 if args.use_optim_params:
     params_txt = "optim_params.txt"
 else:
     params_txt = "params.txt"
 
-params_path = os.path.join(output_path, params_txt)
-
-if "stage1" in args.out_dir:
+calib_dir = os.path.join(
+    args.root_dir, args.seq_path, args.multisequence,
+    "calib", f"stage{args.stage}", "sparse", "0"
+)
+params_path = os.path.join(calib_dir, params_txt)
+if args.stage == 1:
     params = param_utils.read_params(params_path, distortion=True, args=args)
-elif "stage2" in args.out_dir:
+elif args.stage == 2:
     params = param_utils.read_params(params_path, distortion=False, args=args)
 else:
     raise ValueError("Cannot determine whether to assume undistorted.")
 cam_names = list(params[:]["cam_name"])
-removed_camera_path = os.path.join(output_path, 'ignore_camera.txt')
+removed_camera_path = os.path.join(calib_dir, 'ignore_camera.txt')
 if os.path.isfile(removed_camera_path):
     with open(removed_camera_path) as file:
         ignored_cameras = [line.rstrip() for line in file]
@@ -93,21 +95,27 @@ else:
 
 # camera confidence
 if args.confidence_thresh is not None:
-    conf_dir = args.out_dir[:args.out_dir.index("/stage")]
-    conf_path = os.path.join(conf_dir, "image_confidence.json")
+    # conf_dir = args.out_dir[:args.out_dir.index("/stage")]
+    conf_path = os.path.join(
+        args.root_dir, args.seq_path, args.multisequence, "calib", "image_confidence.json"
+    )
     with open(conf_path, "r") as f:
         image_confidence = ujson.load(f)
 
 for selected_vid_idx in selected_vid_idxs:
     print(f'Video ID {selected_vid_idx}...')
     
-    keypoints2d_dir_right = os.path.join(output_path, "keypoints_2d", "right", str(selected_vid_idx).zfill(3))
-    keypoints2d_dir_left = os.path.join(output_path, "keypoints_2d", "left",  str(selected_vid_idx).zfill(3))
+    keypoints2d_dir_right = os.path.join(args.out_dir, "keypoints_2d", "right", str(selected_vid_idx).zfill(3))
+    keypoints2d_dir_left = os.path.join(args.out_dir, "keypoints_2d", "left",  str(selected_vid_idx).zfill(3))
 
+    if args.video_dir:
+        video_dir = os.path.join(args.video_dir, args.seq_path)
+    else:
+        video_dir = image_base
     cam_mapper = map_camera_names(keypoints2d_dir_right, cam_names)
 
     # Get files to process
-    reader = Reader(args.input_type, image_base, cam_names=cam_names, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
+    reader = Reader(args.input_type, video_dir, cam_names=cam_names, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
     if reader.frame_count <= 0:
         continue
         
@@ -120,7 +128,7 @@ for selected_vid_idx in selected_vid_idxs:
     print("Total frames", reader.frame_count)
     intrs, projs, dist_intrs, dists, cameras = get_projections(args, params, cur_cam_names, cam_mapper, easymocap_format=True)
     
-    keypoints3d_dir = os.path.join(output_path, "keypoints_3d", str(selected_vid_idx).zfill(3))
+    keypoints3d_dir = os.path.join(args.out_dir, "keypoints_3d", str(selected_vid_idx).zfill(3))
     try:
         shutil.rmtree(keypoints3d_dir)
     except FileNotFoundError:
@@ -286,7 +294,7 @@ for selected_vid_idx in selected_vid_idxs:
     all_kp3d = np.concatenate([all_kp3d_left, all_kp3d_right], axis=0)  # (points, 4)
     if args.optimize_bad_views:  
         new_rot, new_tr = param_utils.optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False)
-        new_params_path = os.path.join(output_path, "new_params.txt")
+        new_params_path = os.path.join(calib_dir, "new_params.txt")
         param_utils.update_extrinsics(new_params_path, params, new_rot, new_tr)
     else:
         param_utils.optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=True)

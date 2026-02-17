@@ -11,5 +11,16 @@ def add_common_args(parser: ArgumentParser):
     parser.add_argument("--handedness", choices=["left", "right"], default="right", type=str)
     parser.add_argument("--undistort", action="store_true", default=False)
     parser.add_argument("--stride", default=1, type=int)
-    parser.add_argument("--start", default=0, type=int, help="Start frame")
-    parser.add_argument("--end", default=-1, type=int, help="End frame")
+    parser.add_argument("--start", default=0, type=int, help="Which video to start")
+    parser.add_argument("--end", default=-1, type=int, help="Which video to end")
+    parser.add_argument("--len_timestep", type=int, default=150, help="Which frame to end. Start is 0")
+    parser.add_argument(
+        "-m", "--multisequence", type=str, required=True, help="multisequence0000001"
+    )
+    parser.add_argument(
+        "--stage",
+        type=int,
+        choices=[1, 2],
+        default=2,
+        help="1 is before undistort. 2 assumes already undistorted"
+    )

@@ -182,7 +182,7 @@ def main():
     parser.add_argument("--easymocap", default=False, action="store_true", help='Use EasyMocap triangulation')
     parser.add_argument("--confidence_thresh", type=float, default=None, help="Camera confidence threshold")
     parser.add_argument("--optimize_bad_views", action="store_true", help="Optimize extrinsics of bad views")
-    parser.add_argument("--vis_repro", action="store_true", help="Visualize reprojected 3D keypoints")
+    # parser.add_argument("--vis_repro", action="store_true", help="Visualize reprojected 3D keypoints")
     parser.add_argument("--setting", type=str, choices=["brics-mini", "brics-studio", "brics-mobile"])
     args = parser.parse_args()
 
@@ -196,12 +196,16 @@ def main():
     else:
         params_txt = "params.txt"
 
-    params_path = os.path.join(output_path, params_txt)
+    calib_dir = os.path.join(
+        args.root_dir, args.seq_path, args.multisequence,
+        "calib", f"stage{args.stage}", "sparse", "0"
+    )
+    params_path = os.path.join(calib_dir, params_txt)
 
-    if "stage1" in args.out_dir:
+    if args.stage == 1:
         params = param_utils.read_params(params_path, distortion=True, args=args)
         use_parsed = False
-    elif "stage2" in args.out_dir:
+    elif args.stage == 2:
         params = param_utils.read_params(params_path, distortion=False, args=args)
         use_parsed = True
     else:
@@ -210,7 +214,7 @@ def main():
     cam_names = list(params[:]["cam_name"])
     cam_names = [c.replace(".", "") for c in cam_names]
 
-    removed_camera_path = os.path.join(output_path, 'ignore_camera.txt')
+    removed_camera_path = os.path.join(calib_dir, 'ignore_camera.txt')
     if os.path.isfile(removed_camera_path):
         with open(removed_camera_path) as file:
             ignored_cameras = [line.rstrip() for line in file]
@@ -243,8 +247,10 @@ def main():
 
     # Camera confidence
     if args.confidence_thresh is not None:
-        conf_dir = args.out_dir[:args.out_dir.index("/stage")]
-        conf_path = os.path.join(conf_dir, "image_confidence.json")
+        # conf_dir = args.out_dir[:args.out_dir.index("/stage")]
+        conf_path = os.path.join(
+            args.root_dir, args.seq_path, args.multisequence, "calib", "image_confidence.json"
+        )
         with open(conf_path, "r") as f:
             image_confidence = ujson.load(f)
 
@@ -353,6 +359,7 @@ def main():
 
         print(f"Writing 3D keypoints to {keypt_file}")
 
+        chosen_frames_record = []
         with open(keypt_file, "w") as f3d:
             for l_idx in tqdm(range(reader.frame_count), total=all_keypoints2d.shape[1]):
                 if l_idx >= all_keypoints2d.shape[1]:
@@ -385,7 +392,7 @@ def main():
                         keypoints3d, residuals = triangulate_joints(np.asarray(keypoints2d)[valid], np.asarray(projs)[valid], processor=ransac_processor, residual_threshold=10, min_samples=2)
                         print(f"Error: {residuals.mean()}")
                     else:
-                        triangulation = SimpleTriangulate("iterative")
+                        triangulation = SimpleTriangulate("ransac")
                         valid_cameras = {}
                         for k_cam in cameras:
                             if k_cam == "names":
@@ -401,6 +408,8 @@ def main():
                     ujson.dump(np.zeros((NUM_KEYPOINTS, 4)).tolist(), f3d)
                     f3d.write('\n')
                     all_keypoints3d.append(np.zeros((NUM_KEYPOINTS, 4)))
+                
+                chosen_frames_record.append(l_idx)
 
         all_keypoints3d = np.asarray(all_keypoints3d)  # (N_frames, 133, 4)
 
@@ -428,109 +437,113 @@ def main():
             new_rot, new_tr = param_utils.optimize_extrinsics(
                 cameras, all_kp2d, all_kp3d, inspect_only=False
             )
-            new_params_path = os.path.join(output_path, "new_params.txt")
+            new_params_path = os.path.join(calib_dir, "new_params.txt")
             param_utils.update_extrinsics(new_params_path, params, new_rot, new_tr)
         else:
             all_kp2d = all_keypoints2d.reshape(all_keypoints2d.shape[0], -1, 3)
             all_kp3d = all_keypoints3d.reshape(-1, 4)
             param_utils.optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=True)
 
+        chosen_path = os.path.join(keypoints3d_dir, "chosen_frames.json")
+        with open(chosen_path, "w") as f:
+            ujson.dump(chosen_frames_record, f, indent=2)
+
         # Visualization
-        if args.vis_repro:
-            print("Creating reprojection visualization...")
-            vis_dir = os.path.join(output_path, "vis_repro_3d", str(selected_vid_idx).zfill(3))
-            os.makedirs(vis_dir, exist_ok=True)
-            vis_path = os.path.join(vis_dir, "repro.mp4")
+        # if args.vis_repro:
+        print("Creating reprojection visualization...")
+        vis_dir = os.path.join(output_path, "vis_repro_3d", str(selected_vid_idx).zfill(3))
+        os.makedirs(vis_dir, exist_ok=True)
+        vis_path = os.path.join(vis_dir, "repro.mp4")
+
+        # Load images
+        if use_parsed:
+            # multiseq_dir = args.out_dir[:args.out_dir.index("calib")]
+            parsed_dir = os.path.join(args.root_dir, args.seq_path, args.multisequence, "parsed")
+
+        # Determine grid size
+        grid_cols = int(np.ceil(np.sqrt(len(cur_cam_names) * 1.5)))
+
+        # Get image dimensions from first frame
+        if use_parsed:
+            # first_frame = chosen_frames[0]
+            sample_fidx = all_keypoints2d.shape[1] // 2
+            timestamp_dir = os.path.join(parsed_dir, f"timestamp_{sample_fidx}", "images")
+            sample_cam = cur_cam_names[0]
+            sample_path = os.path.join(timestamp_dir, f"{sample_cam}.jpg")
+            sample_img = cv2.imread(sample_path)
+            im_h, im_w = sample_img.shape[:2]
+        else:
+            im_h, im_w = params["height"][0], params["width"][0]
+
+        # Scale for collage
+        grid_rows = int(np.ceil(len(cur_cam_names) / grid_cols))
+        target_height = 1000
+        scale_factor = target_height / (grid_rows * im_h)
+        scaled_w = int(im_w * scale_factor)
+        scaled_h = int(im_h * scale_factor)
+
+        collage_w = scaled_w * grid_cols
+        collage_h = scaled_h * grid_rows
+
+        vis_writer = create_video_writer(vis_path, (collage_w, collage_h), fps=30)
+
+        for frame_idx in tqdm(range(len(chosen_frames)), desc="Creating visualization"):
+            if frame_idx >= all_keypoints3d.shape[0]:
+                break
+            chosen_f = chosen_frames[frame_idx]
 
             # Load images
             if use_parsed:
-                multiseq_dir = args.out_dir[:args.out_dir.index("calib")]
-                parsed_dir = os.path.join(multiseq_dir, "parsed")
-
-            # Determine grid size
-            grid_cols = int(np.ceil(np.sqrt(len(cur_cam_names) * 1.5)))
-
-            # Get image dimensions from first frame
-            if use_parsed:
-                # first_frame = chosen_frames[0]
-                sample_fidx = all_keypoints2d.shape[1] // 2
-                timestamp_dir = os.path.join(parsed_dir, f"timestamp_{sample_fidx}", "images")
-                sample_cam = cur_cam_names[0]
-                sample_path = os.path.join(timestamp_dir, f"{sample_cam}.jpg")
-                sample_img = cv2.imread(sample_path)
-                im_h, im_w = sample_img.shape[:2]
+                timestamp_dir = os.path.join(parsed_dir, f"timestamp_{chosen_f}", "images")
+                frames = {}
+                for cam in cur_cam_names:
+                    if cam in cam_mapper:
+                        frame_path = os.path.join(timestamp_dir, f"{cam}.jpg")
+                        if os.path.exists(frame_path):
+                            frames[cam] = cv2.imread(frame_path)
+                        else:
+                            frames[cam] = np.ones((im_h, im_w, 3), dtype=np.uint8) * 255
             else:
-                im_h, im_w = params["height"][0], params["width"][0]
+                # Load from video (not implemented here)
+                frames = {cam: np.ones((im_h, im_w, 3), dtype=np.uint8) * 255 for cam in cur_cam_names}
 
-            # Scale for collage
-            grid_rows = int(np.ceil(len(cur_cam_names) / grid_cols))
-            target_height = 1000
-            scale_factor = target_height / (grid_rows * im_h)
-            scaled_w = int(im_w * scale_factor)
-            scaled_h = int(im_h * scale_factor)
+            # Project 3D keypoints to 2D
+            kp3d = all_keypoints3d[frame_idx]
+            kp2d_repro = projectN3(kp3d, projs)  # (N_cams, 133, 3)
+            kp2d_repro[:, :, 2] = 0.5
 
-            collage_w = scaled_w * grid_cols
-            collage_h = scaled_h * grid_rows
+            # Draw on each camera
+            vis_images = []
+            for cam_idx, cam in enumerate(cur_cam_names):
+                if cam not in frames:
+                    continue
 
-            vis_writer = create_video_writer(vis_path, (collage_w, collage_h), fps=30)
+                img = frames[cam].copy()
 
-            for frame_idx in tqdm(range(len(chosen_frames)), desc="Creating visualization"):
-                if frame_idx >= all_keypoints3d.shape[0]:
-                    break
-                chosen_f = chosen_frames[frame_idx]
+                # Undistort if needed
+                if args.undistort and not (dists[cam_idx] == 0).all():
+                    img = param_utils.undistort_image(
+                        intrs[cam_idx], dist_intrs[cam_idx], dists[cam_idx], img
+                    )
 
-                # Load images
-                if use_parsed:
-                    timestamp_dir = os.path.join(parsed_dir, f"timestamp_{chosen_f}", "images")
-                    frames = {}
-                    for cam in cur_cam_names:
-                        if cam in cam_mapper:
-                            frame_path = os.path.join(timestamp_dir, f"{cam}.jpg")
-                            if os.path.exists(frame_path):
-                                frames[cam] = cv2.imread(frame_path)
-                            else:
-                                frames[cam] = np.ones((im_h, im_w, 3), dtype=np.uint8) * 255
-                else:
-                    # Load from video (not implemented here)
-                    frames = {cam: np.ones((im_h, im_w, 3), dtype=np.uint8) * 255 for cam in cur_cam_names}
+                # Draw skeleton
+                img_vis = draw_skeleton_on_image(img, kp2d_repro[cam_idx], conf_thresh=0.3)
 
-                # Project 3D keypoints to 2D
-                kp3d = all_keypoints3d[frame_idx]
-                kp2d_repro = projectN3(kp3d, projs)  # (N_cams, 133, 3)
-                kp2d_repro[:, :, 2] = 0.5
+                # Add camera name
+                cv2.putText(img_vis, cam, (10, 70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 2.0, (255, 255, 255), 3)
 
-                # Draw on each camera
-                vis_images = []
-                for cam_idx, cam in enumerate(cur_cam_names):
-                    if cam not in frames:
-                        continue
+                # Resize for collage
+                img_vis_resized = cv2.resize(img_vis, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
+                vis_images.append(img_vis_resized)
 
-                    img = frames[cam].copy()
+            # Create collage
+            collage = create_visualization_grid(vis_images, grid_cols=grid_cols)
+            vis_writer.write(collage)
 
-                    # Undistort if needed
-                    if args.undistort and not (dists[cam_idx] == 0).all():
-                        img = param_utils.undistort_image(
-                            intrs[cam_idx], dist_intrs[cam_idx], dists[cam_idx], img
-                        )
-
-                    # Draw skeleton
-                    img_vis = draw_skeleton_on_image(img, kp2d_repro[cam_idx], conf_thresh=0.3)
-
-                    # Add camera name
-                    cv2.putText(img_vis, cam, (10, 70),
-                               cv2.FONT_HERSHEY_SIMPLEX, 2.0, (255, 255, 255), 3)
-
-                    # Resize for collage
-                    img_vis_resized = cv2.resize(img_vis, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
-                    vis_images.append(img_vis_resized)
-
-                # Create collage
-                collage = create_visualization_grid(vis_images, grid_cols=grid_cols)
-                vis_writer.write(collage)
-
-            vis_writer.release()
-            convert_video_ffmpeg(vis_path)
-            print(f"Visualization saved to: {vis_path}")
+        vis_writer.release()
+        convert_video_ffmpeg(vis_path)
+        print(f"Visualization saved to: {vis_path}")
 
 
 if __name__ == '__main__':

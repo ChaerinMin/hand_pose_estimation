@@ -127,11 +127,15 @@ if args.use_optim_params:
     params_txt = "optim_params.txt"
 else:
     params_txt = "params.txt"
-params_path = os.path.join(args.out_dir, params_txt)
-if "stage1" in args.out_dir:
+calib_dir = os.path.join(
+    args.root_dir, args.seq_path, args.multisequence,
+    "calib", f"stage{args.stage}", "sparse", "0"
+)
+params_path = os.path.join(calib_dir, params_txt)
+if args.stage == 1:
     params = param_utils.read_params(params_path, distortion=True, args=args)
     use_parsed = False
-elif "stage2" in args.out_dir:
+elif args.stage == 2:
     params = param_utils.read_params(params_path, distortion=False, args=args)
     use_parsed = True
 else:
@@ -139,7 +143,7 @@ else:
 
 # remove cameras
 cam_names = list(params[:]["cam_name"])
-removed_camera_path = os.path.join(output_path, 'ignore_camera.txt')
+removed_camera_path = os.path.join(calib_dir, 'ignore_camera.txt')
 if os.path.isfile(removed_camera_path):
     with open(removed_camera_path) as file:
         ignored_cameras = [line.rstrip() for line in file]
@@ -188,8 +192,12 @@ for selected_vid_idx in selected_vid_idxs:
     cam_mapper = map_camera_names(keypoints2d_dir_right, cam_names)
 
     # image paths
+    if args.video_dir:
+        video_dir = os.path.join(args.video_dir, args.seq_path)
+    else:
+        video_dir = image_base
     reader = Reader(
-        args.input_type, image_base, cam_names=cam_names,
+        args.input_type, video_dir, cam_names=cam_names,
         cams_to_remove=cams_to_remove, ith=selected_vid_idx,
         anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera
     )

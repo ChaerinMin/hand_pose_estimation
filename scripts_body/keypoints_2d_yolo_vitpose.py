@@ -381,7 +381,7 @@ def extract_keypoints(args, params, cam_names, cam_mapper,
     ):
         im_names, orig_imgs, im_h, im_w = frame_preprocess(
             input_video_path,
-            "stage2" in args.out_dir,  # use_parsed
+            args.stage == 2,  # use_parsed
             args,
             intrs[v_idx], dist_intrs[v_idx], dists[v_idx]
         )
@@ -463,12 +463,12 @@ def create_collage_video(args, params, cam_names, cam_mapper,
         cam_name_slicer = slice(0,18)
     else:
         raise NotImplementedError()
-    assert "stage2" in args.out_dir, "Only implemented for use_parsed"
+    assert args.stage == 2, "Only implemented for use_parsed"
     cam_name = os.path.basename(cam_video_paths[cam_names_sorted[0]]).split('.')[0][cam_name_slicer]
-    multiseq_chr = args.out_dir.index("multisequence")
-    multiseq = args.out_dir[multiseq_chr:multiseq_chr+19]
-    data_root = args.out_dir[:multiseq_chr]
-    parsed_dir = os.path.join(data_root, multiseq, "parsed")
+    # multiseq_chr = args.out_dir.index("multisequence")
+    # multiseq = args.out_dir[multiseq_chr:multiseq_chr+19]
+    # data_root = args.out_dir[:multiseq_chr]
+    parsed_dir = os.path.join(args.root_dir, args.seq_path, args.multisequence, "parsed")
     timestamp_dirs = natsort.natsorted(glob.glob(os.path.join(parsed_dir, "timestamp_*")))
     datalen = len(timestamp_dirs)
     img_path = os.path.join(timestamp_dirs[datalen//2], "images", f"{cam_name}.jpg")
@@ -521,11 +521,11 @@ def main():
     parser = argparse.ArgumentParser(description='Full-Body 2D Keypoint Detection (COCO-WholeBody 133)')
     add_common_args(parser)
     parser.add_argument("--use_optim_params", action="store_true")
-    parser.add_argument('--batch_size', type=int, default=128, help='Batch size for YOLO + ViTPose')
+    parser.add_argument('--batch_size', type=int, default=1024, help='Batch size for YOLO + ViTPose')
     parser.add_argument('--box_score_threshold', type=float, default=0.2, help='Confidence threshold for person detection')
     parser.add_argument('--yolo_model', type=str, default='yolov9c.pt', help='YOLO model for person detection')
     parser.add_argument('--no_refine', action='store_true', help='Skip two-stage crop refinement for face/hands')
-    parser.add_argument('--vis', action='store_true', help='Create collage visualization video from all cameras')
+    # parser.add_argument('--vis', action='store_true', default=True, help='Create collage visualization video from all cameras')
     parser.add_argument('--vis_only', action='store_true', help='Only create visualization (skip keypoint extraction)')
     parser.add_argument("--setting", type=str, choices=["brics-mini", "brics-studio", "brics-mobile"])
     args = parser.parse_args()
@@ -538,17 +538,21 @@ def main():
     else:
         params_txt = "params.txt"
 
-    params_path = os.path.join(args.out_dir, params_txt)
-    if "stage1" in args.out_dir:
+    calib_dir = os.path.join(
+        args.root_dir, args.seq_path, args.multisequence,
+        "calib", f"stage{args.stage}", "sparse", "0"
+    )
+    params_path = os.path.join(calib_dir, params_txt)
+    if args.stage == 1:
         params = param_utils.read_params(params_path, distortion=True, args=args)
-    elif "stage2" in args.out_dir:
+    elif args.stage == 2:
         params = param_utils.read_params(params_path, distortion=False, args=args)
     else:
         raise ValueError("Cannot determine whether to assume undistorted.")
 
     cam_names = list(params[:]["cam_name"])
     cam_names = [c.replace(".", "") for c in cam_names]
-    removed_camera_path = os.path.join(args.out_dir, 'ignore_camera.txt')
+    removed_camera_path = os.path.join(calib_dir, 'ignore_camera.txt')
     if os.path.isfile(removed_camera_path):
         with open(removed_camera_path) as file:
             ignored_cameras = [line.rstrip() for line in file]
@@ -618,10 +622,10 @@ def main():
                             cpm, model, refine_crops)
 
         # Phase 2: Create collage visualization
-        if args.vis:
-            print("Phase 2: Creating collage visualization...")
-            create_collage_video(args, params, cam_names, cam_mapper,
-                               cur_cam_names, reader, selected_vid_idx)
+        # if args.vis:
+        print("Phase 2: Creating collage visualization...")
+        create_collage_video(args, params, cam_names, cam_mapper,
+                            cur_cam_names, reader, selected_vid_idx)
 
 
 def _process_batch(

@@ -170,7 +170,7 @@ def main():
     parser.add_argument('--yolo_model', type=str, default='yolov9c.pt', help='YOLO Model for BBX Detection')
     parser.add_argument('--remove_side_cam', type=bool, default=True, help='Remove Side Cameras')
     parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove Bottom Cameras')
-    parser.add_argument('--use_hamer', type=bool, default=False, help='YOLO -> ViTPose -> Hamer pipeline')
+    parser.add_argument('--use_hamer', type=bool, default=True, help='YOLO -> ViTPose -> Hamer pipeline')
     parser.add_argument("--setting", type=str, choices=["brics-mini", "brics-studio", "brics-mobile"])
     args = parser.parse_args()
     os.system("module load ffmpeg")
@@ -194,18 +194,22 @@ def main():
     else:
         params_txt = "params.txt"
 
-    params_path = os.path.join(args.out_dir, params_txt)
-    if "stage1" in args.out_dir:
+    calib_dir = os.path.join(
+        args.root_dir, args.seq_path, args.multisequence,
+        "calib", f"stage{args.stage}", "sparse", "0"
+    )
+    params_path = os.path.join(calib_dir, params_txt)
+    if args.stage == 1:
         params = param_utils.read_params(params_path, distortion=True, args=args)
         use_parsed = False
-    elif "stage2" in args.out_dir:
+    elif args.stage == 2:
         params = param_utils.read_params(params_path, distortion=False, args=args)
         use_parsed = True
     else:
         raise ValueError("Cannot determine whether to assume undistorted.")
     cam_names = list(params[:]["cam_name"])
     cam_names = [c.replace(".", "") for c in cam_names]
-    removed_camera_path = os.path.join(args.out_dir, 'ignore_camera.txt')
+    removed_camera_path = os.path.join(calib_dir, 'ignore_camera.txt')
     if os.path.isfile(removed_camera_path):
         with open(removed_camera_path) as file:
             ignored_cameras = [line.rstrip() for line in file]
@@ -225,13 +229,13 @@ def main():
     if args.ith == -1:
         total_video_idxs = 0
         max_folder_id = 0
-        for fid, folder in enumerate(os.listdir(input_path)):
+        for fid, folder in enumerate(os.listdir(video_dir)):
             if 'cam' in folder and folder not in cams_to_remove:
-                length = len([file for file in os.listdir(os.path.join(input_path, folder)) if file.endswith('.mp4')])
+                length = len([file for file in os.listdir(os.path.join(video_dir, folder)) if file.endswith('.mp4')])
                 if length > total_video_idxs:
                     total_video_idxs = length
                     max_folder_id = fid
-                    anchor_camera_by_length = os.listdir(input_path)[fid]
+                    anchor_camera_by_length = os.listdir(video_dir)[fid]
         if args.start > 0:
             if args.end > 0:
                 selected_vid_idxs = list(range(args.start, args.end))
@@ -258,7 +262,7 @@ def main():
         os.makedirs(output_bbx_right_path, exist_ok=True)
 
         # Get files to process
-        reader = Reader(args.input_type, input_path, cam_names=cam_names, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
+        reader = Reader(args.input_type, video_dir, cam_names=cam_names, cams_to_remove=cams_to_remove, ith=selected_vid_idx, anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera)
         if reader.frame_count <= 0:
             continue
         
