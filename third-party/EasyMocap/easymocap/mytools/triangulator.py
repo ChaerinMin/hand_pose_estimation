@@ -166,6 +166,125 @@ def project_and_distance(kpts3d, RT, kpts2d):
     dist = np.linalg.norm(kpts_proj[..., :2] - kpts2d[..., :2], axis=-1) * conf
     return dist, conf
 
+def ransac_triangulate(kpts2d, RT, previous=None,
+    min_conf=0.1, min_view=3, min_joints=3, dist_max=0.05, dist_vel=0.05,
+    ransac_iterations=100, debug=False):
+    """RANSAC-based triangulation
+
+    Args:
+        kpts2d (nViews, nJoints, 3): 2D keypoints with confidence
+        RT (nViews, 3, 4): projection matrices
+        previous: previous 3D keypoints for motion filtering
+        min_conf: minimum confidence threshold
+        min_view: minimum number of views for triangulation
+        min_joints: minimum number of joints required
+        dist_max: maximum reprojection error threshold for inliers
+        dist_vel: maximum velocity for motion filtering
+        ransac_iterations: number of RANSAC iterations
+        debug: debug flag
+
+    Returns:
+        kpts3d: (nJoints, 4) triangulated 3D keypoints
+        kpts2d: (nViews, nJoints, 3) filtered 2D keypoints
+    """
+    kpts2d = kpts2d.copy()
+    conf = kpts2d[..., -1]
+    kpts2d[conf<min_conf] = 0.
+    if debug:
+        log('[ransac_triangulate] kpts2d: {}'.format(kpts2d.shape))
+
+    # Motion filtering with previous frame
+    if previous is not None:
+        dist, conf = project_and_distance(previous, RT, kpts2d)
+        nottrack = (dist > dist_vel) & conf
+        if nottrack.sum() > 0:
+            kpts2d[nottrack] = 0.
+            if debug:
+                log('[ransac_triangulate] Remove with track {}'.format(np.where(nottrack)))
+
+    nViews, nJoints = kpts2d.shape[:2]
+    kpts3d_final = np.zeros((nJoints, 4))
+    kpts2d_final = kpts2d.copy()
+
+    # RANSAC for each joint independently
+    for j in range(nJoints):
+        valid_views = np.where(kpts2d[:, j, -1] > 0)[0]
+
+        if len(valid_views) < min_view:
+            continue
+
+        best_inliers = []
+        best_score = -1
+        best_kpts3d = None
+
+        # RANSAC iterations
+        for iteration in range(ransac_iterations):
+            # 1. Randomly sample min_view views
+            if len(valid_views) == min_view:
+                sample_views = valid_views
+            else:
+                sample_views = np.random.choice(valid_views, size=min_view, replace=False)
+
+            # 2. Triangulate using the sampled views
+            kpts2d_sample = np.zeros((nViews, 1, 3))
+            kpts2d_sample[sample_views, 0] = kpts2d[sample_views, j]
+
+            kpts3d_sample = batch_triangulate(kpts2d_sample, RT, min_view=min_view)
+
+            if kpts3d_sample[0, -1] == 0:
+                continue
+
+            # 3. Project to all valid views and compute reprojection error
+            kpts_proj = project_points(kpts3d_sample, RT[valid_views])
+
+            # Calculate reprojection errors
+            errors = np.linalg.norm(
+                kpts_proj[:, 0, :2] - kpts2d[valid_views, j, :2],
+                axis=-1
+            )
+
+            # 4. Count inliers
+            inliers = valid_views[errors < dist_max]
+            score = len(inliers)
+
+            # Weighted score considering confidence
+            weighted_score = kpts2d[inliers, j, -1].sum()
+
+            # 5. Keep the best model
+            if weighted_score > best_score:
+                best_score = weighted_score
+                best_inliers = inliers
+                best_kpts3d = kpts3d_sample[0]
+
+        # 6. Refine with all inliers
+        if len(best_inliers) >= min_view:
+            kpts2d_inliers = np.zeros((nViews, 1, 3))
+            kpts2d_inliers[best_inliers, 0] = kpts2d[best_inliers, j]
+
+            kpts3d_refined = batch_triangulate(kpts2d_inliers, RT, min_view=min_view)
+
+            if kpts3d_refined[0, -1] > 0:
+                kpts3d_final[j] = kpts3d_refined[0]
+
+                # Mark outliers in kpts2d_final
+                outliers = np.setdiff1d(valid_views, best_inliers)
+                kpts2d_final[outliers, j, -1] = 0
+
+                if debug:
+                    log('[ransac_triangulate] Joint {}: {} inliers / {} views'.format(
+                        j, len(best_inliers), len(valid_views)))
+
+    if debug:
+        log('[ransac_triangulate] finally {} valid points'.format((kpts3d_final[..., -1]>0).sum()))
+
+    if (kpts3d_final[..., -1]>0).sum() < min_joints:
+        kpts3d_final[..., -1] = 0.
+        kpts2d_final[..., -1] = 0.
+        return kpts3d_final, kpts2d_final
+
+    return kpts3d_final, kpts2d_final
+
+
 def iterative_triangulate(kpts2d, RT, previous=None,
     min_conf=0.1, min_view=3, min_joints=3, dist_max=0.05, dist_vel=0.05,
     thres_outlier_view=0.4, thres_outlier_joint=0.4, debug=False):

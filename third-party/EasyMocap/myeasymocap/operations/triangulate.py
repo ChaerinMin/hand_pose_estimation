@@ -1,7 +1,7 @@
 import numpy as np
 from itertools import combinations
 from easymocap.mytools.camera_utils import Undistort
-from easymocap.mytools.triangulator import iterative_triangulate
+from easymocap.mytools.triangulator import iterative_triangulate, ransac_triangulate
 
 def batch_triangulate(keypoints_, Pall, min_view=2):
     """ triangulate the keypoints of whole body
@@ -76,8 +76,18 @@ class SimpleTriangulate:
         keypoints = np.stack(keypoints)
         if self.mode == 'naive':
             keypoints3d = batch_triangulate(keypoints, cameras['P'])
+        elif self.mode == 'iterative':
+            keypoints3d, k2d = iterative_triangulate(
+                keypoints, cameras['P'],
+                dist_max=dist_max, min_conf=min_conf, min_view=min_view,
+                thres_outlier_view=thres_outlier_view, thres_outlier_joint=thres_outlier_joint
+            )
+        elif self.mode == 'ransac':
+            keypoints3d, k2d = ransac_triangulate(
+                keypoints, cameras['P'], dist_max=dist_max, min_conf=min_conf, min_view=min_view
+            )
         else:
-            keypoints3d, k2d = iterative_triangulate(keypoints, cameras['P'], dist_max=dist_max, min_conf=min_conf, min_view=min_view, thres_outlier_view=thres_outlier_view, thres_outlier_joint=thres_outlier_joint)
+            raise ValueError('Unknown triangulation mode {}'.format(self.mode))
         return {'keypoints3d': keypoints3d}
 
 class RobustTriangulate(SimpleTriangulate):
