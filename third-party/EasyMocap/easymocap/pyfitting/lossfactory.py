@@ -58,6 +58,12 @@ class LossKeypoints3D:
         diff_square = (kpts_est[:, :nJoints, :3] - self.keypoints3d[:, :nJoints, :3])*self.conf[:, :nJoints]
         return self.loss(diff_square)
 
+    def body_global(self, kpts_est, **kwargs):
+        "distance of keypoints3d"
+        static_joints = torch.tensor([0,1,2,5,8,9,12], dtype=torch.int).to(kpts_est.device)
+        diff_square = (kpts_est[:, static_joints, :3] - self.keypoints3d[:, static_joints, :3])*self.conf[:, static_joints]
+        return self.loss(diff_square)
+
     def hand(self, kpts_est, **kwargs):
         "distance of 3d hand keypoints"
         diff_square = (kpts_est[:, 25:25+42, :3] - self.keypoints3d[:, 25:25+42, :3])*self.conf[:, 25:25+42]

@@ -15,7 +15,9 @@ def multi_stage_optimize(body_model, params, kp3ds, kp2ds=None, bboxes=None, Pal
     with Timer('Optimize global RT'):
         cfg.OPT_R = True
         cfg.OPT_T = True
+        cfg.GLOBAL_ONLY = True
         params = optimizePose3D(body_model, params, kp3ds, weight=weight, cfg=cfg)
+        cfg.GLOBAL_ONLY = False
         # params = optimizePose(body_model, params, kp3ds, weight_loss=weight, kintree=config['kintree'], cfg=cfg)
     with Timer('Optimize 3D Pose/{} frames'.format(kp3ds.shape[0])):
         cfg.OPT_POSE = True
@@ -77,20 +79,25 @@ def smpl_from_keypoints3d2d(body_model, kp3ds, kp2ds, bboxes, Pall, config, args
     params = multi_stage_optimize(body_model, params, kp3ds, kp2ds, bboxes, Pall, weight_pose, cfg)
     return params
 
-def smpl_from_keypoints3d(body_model, kp3ds, config, args, 
-    weight_shape=None, weight_pose=None):
+def smpl_from_keypoints3d(body_model, kp3ds, config, args,
+    weight_shape=None, weight_pose=None, init_shapes=None):
     model_type = body_model.model_type
     params_init = body_model.init_params(nFrames=1)
-    if weight_shape is None:
-        weight_shape = load_weight_shape(model_type, args.opts)
-    if model_type in ['smpl', 'smplh', 'smplx']:
-        # when use SMPL model, optimize the shape only with first 1-14 limbs, 
-        # don't use (nose, neck)
-        params_shape = optimizeShape(body_model, params_init, kp3ds, 
-            weight_loss=weight_shape, kintree=CONFIG['body15']['kintree'][1:])
+    if init_shapes is not None:
+        # skip optimizeShape: use pre-computed personalized shape
+        params_shape = params_init.copy()
+        params_shape['shapes'] = init_shapes  # shape: (1, num_betas)
     else:
-        params_shape = optimizeShape(body_model, params_init, kp3ds, 
-            weight_loss=weight_shape, kintree=config['kintree'])
+        if weight_shape is None:
+            weight_shape = load_weight_shape(model_type, args.opts)
+        if model_type in ['smpl', 'smplh', 'smplx']:
+            # when use SMPL model, optimize the shape only with first 1-14 limbs,
+            # don't use (nose, neck)
+            params_shape = optimizeShape(body_model, params_init, kp3ds,
+                weight_loss=weight_shape, kintree=CONFIG['body15']['kintree'][1:])
+        else:
+            params_shape = optimizeShape(body_model, params_init, kp3ds,
+                weight_loss=weight_shape, kintree=config['kintree'])
     # optimize 3D pose
     cfg = Config(args)
     cfg.device = body_model.device

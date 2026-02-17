@@ -219,7 +219,7 @@ def _optimizeSMPL(body_model, body_params, prepare_funcs, postprocess_funcs,
     grad_require(opt_params, True)
     optimizer = LBFGS(opt_params, 
         line_search_fn='strong_wolfe')
-    PRINT_STEP = 100
+    PRINT_STEP = 10
     records = []
     def closure(debug=False):
         # 0. Prepare body parameters => new_params
@@ -275,8 +275,12 @@ def optimizePose3D(body_model, params, keypoints3d, weight, cfg):
         get_prepare_smplx(params, cfg, nFrames),
         get_interp_by_keypoints(keypoints3d)
     ]
+    if cfg.GLOBAL_ONLY:
+        k3d_func = LossKeypoints3D(keypoints3d, cfg).body_global
+    else:
+        k3d_func = LossKeypoints3D(keypoints3d, cfg).body
     loss_funcs = {
-        'k3d': LossKeypoints3D(keypoints3d, cfg).body,
+        'k3d': k3d_func,
         'smooth_body': LossSmoothBodyMean(cfg).body,
         'smooth_poses': LossSmoothPoses(1, nFrames, cfg).poses,
         'reg_poses': LossRegPoses(cfg).reg_body,

@@ -1,10 +1,8 @@
 import argparse
-import glob
 import json
 import os
 import sys
 import cv2
-import math
 
 import numpy as np
 import ujson
@@ -20,7 +18,6 @@ from src.utils.filter import apply_one_euro_filter_2d, apply_one_euro_filter_3d
 from src.utils.parser import add_common_args
 from src.utils.reader_v2 import Reader
 from src.utils.video_handler import convert_video_ffmpeg, create_video_writer
-from src.utils.fingers import compute_scale_factor
 from easymocap.dataset import CONFIG
 from easymocap.mytools import Timer
 from easymocap.pipeline import smpl_from_keypoints3d, smpl_from_keypoints3d2d
@@ -90,6 +87,12 @@ parser.add_argument('--model', type=str, default='smpl', choices=['smpl', 'smplh
 parser.add_argument("--optimize_bad_views", action="store_true", help="Whether to optimize extrinsics of bad views")
 parser.add_argument('--gender', type=str, default='neutral', choices=['neutral', 'male', 'female'])
 parser.add_argument("--refine_shape_with_mask", action="store_true", help="Refine MANO shape parameters using hand masks")
+parser.add_argument(
+    "--subject_name", type=str, default=None,
+    help="If refine_shape_with_mask, save beta with subject_name. " \
+        "If not refine_shape_with_mask, load beta with subject_name. " \
+        "If not provided, do not load beta"
+)
 parser.add_argument('--save_origin', action='store_true')
 parser.add_argument('--verbose', action='store_true')
 parser.add_argument('--opts', help="Modify config options using the command-line", 
@@ -118,21 +121,24 @@ else:
     params_txt = "params.txt"
 base_path = os.path.join(args.root_dir)
 image_dir = os.path.join(base_path, args.seq_path)
-output_path = args.out_dir
-params_path = os.path.join(output_path, params_txt)
+calib_dir = os.path.join(
+    args.root_dir, args.seq_path, args.multisequence,
+    "calib", f"stage{args.stage}", "sparse", "0"
+)
+params_path = os.path.join(calib_dir, params_txt)
 assert os.path.exists(params_path)
 
 # filter out some cameras
-if "stage1" in args.out_dir:
+if args.stage == 1:
     params = param_utils.read_params(params_path, distortion=True, args=args)
     use_parsed = False
-elif "stage2" in args.out_dir:
+elif args.stage == 2:
     params = param_utils.read_params(params_path, distortion=False, args=args)
     use_parsed = True
 else:
     raise ValueError("Cannot determine whether to assume undistorted.")
 cam_names = list(params[:]["cam_name"])
-removed_camera_path = os.path.join(output_path, 'ignore_camera.txt')
+removed_camera_path = os.path.join(calib_dir, 'ignore_camera.txt')
 if os.path.isfile(removed_camera_path):
     with open(removed_camera_path) as file:
         ignored_cameras = [line.rstrip() for line in file]
@@ -171,8 +177,9 @@ else:
 
 # camera confidence
 if args.confidence_thresh is not None:
-    conf_dir = args.out_dir[:args.out_dir.index("/stage")]
-    conf_path = os.path.join(conf_dir, "image_confidence.json")
+    conf_path = os.path.join(
+        args.root_dir, args.seq_path, args.multisequence, "calib", "image_confidence.json"
+    )
     with open(conf_path, "r") as f:
         image_confidence = ujson.load(f)
     confident = {}
@@ -181,12 +188,17 @@ if args.confidence_thresh is not None:
 else:
     confident = None
 
+if args.video_dir:
+    video_dir = os.path.join(args.video_dir, args.seq_path)
+else:
+    video_dir = image_dir
+
 for selected_vid_idx in selected_vid_idxs:
     print(f'Video ID {selected_vid_idx}...')
     # read video
     reader = Reader(
         "video",
-        image_dir,
+        video_dir,
         cam_names=cam_names,
         cams_to_remove=cams_to_remove,
         ith=selected_vid_idx,
@@ -196,11 +208,11 @@ for selected_vid_idx in selected_vid_idxs:
         continue
     
     # 2d/3d keypoint paths
-    keypoints2d_dir_right = os.path.join(output_path, "keypoints_2d", "right", str(selected_vid_idx).zfill(3))
-    keypoints2d_dir_left = os.path.join(output_path, "keypoints_2d", "left",  str(selected_vid_idx).zfill(3))
-    bboxes_dir_right = os.path.join(output_path, "bboxes", "right",  str(selected_vid_idx).zfill(3))
-    bboxes_dir_left = os.path.join(output_path, "bboxes", "left",  str(selected_vid_idx).zfill(3))
-    keypoints3d_dir = os.path.join(output_path, "keypoints_3d", str(selected_vid_idx).zfill(3))
+    keypoints2d_dir_right = os.path.join(args.out_dir, "keypoints_2d", "right", str(selected_vid_idx).zfill(3))
+    keypoints2d_dir_left = os.path.join(args.out_dir, "keypoints_2d", "left",  str(selected_vid_idx).zfill(3))
+    bboxes_dir_right = os.path.join(args.out_dir, "bboxes", "right",  str(selected_vid_idx).zfill(3))
+    bboxes_dir_left = os.path.join(args.out_dir, "bboxes", "left",  str(selected_vid_idx).zfill(3))
+    keypoints3d_dir = os.path.join(args.out_dir, "keypoints_3d", str(selected_vid_idx).zfill(3))
     keypt3d_file_left = os.path.join(keypoints3d_dir, "left.jsonl")
     keypt3d_file_right = os.path.join(keypoints3d_dir, "right.jsonl")
 
@@ -281,7 +293,7 @@ for selected_vid_idx in selected_vid_idxs:
     hand_masks = None
     seg_status = {}
     if args.refine_shape_with_mask:
-        mask_dir = os.path.join(output_path, "mask_2d", str(selected_vid_idx).zfill(3))
+        mask_dir = os.path.join(args.out_dir, "mask_2d", str(selected_vid_idx).zfill(3))
         mask_path = os.path.join(mask_dir, "hand_masks.npz")
         if os.path.exists(mask_path):
             print(f"Loading hand masks from {mask_path}")
@@ -299,7 +311,7 @@ for selected_vid_idx in selected_vid_idxs:
 
             # Assert that all views have the first frame available
             if use_parsed:
-                multiseq_dir = args.out_dir[:args.out_dir.index("calib")]
+                multiseq_dir = os.path.join(args.root_dir, args.seq_path, args.multisequence)
                 parsed_dir = os.path.join(multiseq_dir, "parsed")
                 first_frame = chosen_frames[0]
                 timestamp_dir = os.path.join(parsed_dir, f"timestamp_{first_frame}", "images")
@@ -358,28 +370,48 @@ for selected_vid_idx in selected_vid_idxs:
         keypoints3d_left_scaled = apply_scale_to_keypoints(keypoints3d_left, s_left)
         final_scale_right = 1.0 / s_right
         final_scale_left = 1.0 / s_left
+        # Load personalized shape parameters if subject_name is given without refine_shape_with_mask
+        init_shapes_right = None
+        init_shapes_left = None
+        if not args.refine_shape_with_mask and args.subject_name is not None:
+            shape_save_path = os.path.join(args.root_dir, "personlized_shapes.json")
+            if os.path.exists(shape_save_path):
+                with open(shape_save_path, "r") as f:
+                    all_shapes = json.load(f)
+                if args.subject_name in all_shapes:
+                    subject_shapes = all_shapes[args.subject_name]
+                    init_shapes_right = np.array(subject_shapes["right"]).reshape(1, -1)
+                    init_shapes_left = np.array(subject_shapes["left"]).reshape(1, -1)
+                    print(f"Loaded personalized shapes for subject '{args.subject_name}'")
+                else:
+                    print(f"Warning: Subject '{args.subject_name}' not found in {shape_save_path}")
+            else:
+                print(f"Warning: Shape file not found at {shape_save_path}")
+
         fit_3d2d = False
         if fit_3d2d:
             params_right = smpl_from_keypoints3d2d(
-                body_model_right, keypoints3d_right_scaled, all_keypoints2d_right, all_bboxes_right, projs, 
+                body_model_right, keypoints3d_right_scaled, all_keypoints2d_right, all_bboxes_right, projs,
                 config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose
             )
             params_left = smpl_from_keypoints3d2d(
-                body_model_left, keypoints3d_left_scaled, all_keypoints2d_left, all_bboxes_left, projs, 
+                body_model_left, keypoints3d_left_scaled, all_keypoints2d_left, all_bboxes_left, projs,
                 config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose
             )
         else:
             params_right = smpl_from_keypoints3d(body_model_right, keypoints3d_right_scaled,
-                config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 1e2}, weight_pose=weight_pose) # 5e3
+                config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 1e2}, weight_pose=weight_pose,
+                init_shapes=init_shapes_right) # 5e3
             params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left_scaled,
-                config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 1e2}, weight_pose=weight_pose)
+                config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 1e2}, weight_pose=weight_pose,
+                init_shapes=init_shapes_left)
 
-        # refine shape with hand masks if enabled
+        # hand masks --> shape (beta)
         if args.refine_shape_with_mask and hand_masks is not None:
             print('Refining MANO shape parameters with hand masks...')
             from src.utils.mask_optimize import refine_shape_with_mask
 
-            # Refine right hand
+            # Right hand's shape (beta)
             params_right = refine_shape_with_mask(
                 body_model_right, params_right, hand_masks, cameras,
                 cur_cam_names, cam_mapper, intrs, final_scale_right, keypoints3d_right[0], hand_side="right",
@@ -388,13 +420,28 @@ for selected_vid_idx in selected_vid_idxs:
                 max_iter=20, verbose=True
             )
 
-            # Refine left hand
+            # Left hand's shape (beta)
             params_left = refine_shape_with_mask(
                 body_model_left, params_left, hand_masks, cameras,
                 cur_cam_names, cam_mapper, intrs, final_scale_left, keypoints3d_left[0], hand_side="left",
                 weight_loss={'mask': 1e4, 'reg_shapes': 0.5, 'init_shape': 0.0},
                 max_iter=20, verbose=True
             )
+
+            # Save shape (beta) with subject's name
+            shape_save_path = os.path.join(args.root_dir, "personlized_shapes.json")
+            os.makedirs(os.path.dirname(shape_save_path), exist_ok=True)
+            if os.path.exists(shape_save_path):
+                with open(shape_save_path, "r") as f:
+                    current_persons = json.load(f)
+            else:
+                current_persons = {}
+            current_persons[args.subject_name] = {
+                "left": params_left['shapes'].squeeze(0).tolist(),
+                "right": params_right['shapes'].squeeze(0).tolist()
+            }
+            with open(shape_save_path, "w") as f:
+                json.dump(current_persons, f, indent=4)
 
         # smooth mano parameters
         if args.to_smooth:
@@ -416,39 +463,39 @@ for selected_vid_idx in selected_vid_idxs:
             params_right_list[key] = params_right[key].tolist()
         manos_params['left'] = params_left_list
         manos_params['right'] = params_right_list
-        outhand_mano_params_path = f'{output_path}/params/{str(selected_vid_idx).zfill(3)}.json'
+        outhand_mano_params_path = f'{args.out_dir}/params/{str(selected_vid_idx).zfill(3)}.json'
         os.makedirs(os.path.dirname(outhand_mano_params_path), exist_ok=True)
         with open(outhand_mano_params_path, "w") as f:
             ujson.dump(manos_params, f)
-            
+        
         if args.vis_smpl or args.save_mesh or args.vis_2d_repro or args.vis_3d_repro:
             # save paths
             if args.vis_smpl:
                 # if not args.save_frame:
-                #     os.makedirs(f'{output_path}/mano', exist_ok=True)
-                #     outhand_mano_path = f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}.mp4'
+                #     os.makedirs(f'{args.out_dir}/mano', exist_ok=True)
+                #     outhand_mano_path = f'{args.out_dir}/mano/{str(selected_vid_idx).zfill(3)}.mp4'
                 # else:
-                outhand_mano_path = f'{output_path}/mano/{str(selected_vid_idx).zfill(3)}'
+                outhand_mano_path = f'{args.out_dir}/mano/{str(selected_vid_idx).zfill(3)}'
                 os.makedirs(outhand_mano_path, exist_ok=True)
             if args.vis_2d_repro:
                 # if not args.save_frame:
-                    # os.makedirs(f'{output_path}/repro_2d', exist_ok=True)
-                    # outhand_2d_path = f'{output_path}/repro_2d/{str(selected_vid_idx).zfill(3)}.mp4'
+                    # os.makedirs(f'{args.out_dir}/repro_2d', exist_ok=True)
+                    # outhand_2d_path = f'{args.out_dir}/repro_2d/{str(selected_vid_idx).zfill(3)}.mp4'
                 # else:
-                outhand_2d_path = f'{output_path}/repro_2d/{str(selected_vid_idx).zfill(3)}'
+                outhand_2d_path = f'{args.out_dir}/repro_2d/{str(selected_vid_idx).zfill(3)}'
                 os.makedirs(outhand_2d_path, exist_ok=True)
             if args.vis_3d_repro:
                 # if not args.save_frame:
-                #     os.makedirs(f'{output_path}/repro_3d', exist_ok=True)
-                #     outhand_3d_path = f'{output_path}/repro_3d/{str(selected_vid_idx).zfill(3)}.mp4'
+                #     os.makedirs(f'{args.out_dir}/repro_3d', exist_ok=True)
+                #     outhand_3d_path = f'{args.out_dir}/repro_3d/{str(selected_vid_idx).zfill(3)}.mp4'
                 # else:
-                outhand_3d_path = f'{output_path}/repro_3d/{str(selected_vid_idx).zfill(3)}'
+                outhand_3d_path = f'{args.out_dir}/repro_3d/{str(selected_vid_idx).zfill(3)}'
                 os.makedirs(outhand_3d_path, exist_ok=True)
             # if not args.save_frame:
-            #     os.makedirs(f'{output_path}/regress_joints', exist_ok=True)
-            #     outjoint_3d_path = f'{output_path}/regress_joints/{str(selected_vid_idx).zfill(3)}.mp4'
+            #     os.makedirs(f'{args.out_dir}/regress_joints', exist_ok=True)
+            #     outjoint_3d_path = f'{args.out_dir}/regress_joints/{str(selected_vid_idx).zfill(3)}.mp4'
             # else:
-            outjoint_3d_path = f'{output_path}/regress_joints/{str(selected_vid_idx).zfill(3)}'
+            outjoint_3d_path = f'{args.out_dir}/regress_joints/{str(selected_vid_idx).zfill(3)}'
             os.makedirs(outjoint_3d_path, exist_ok=True)
 
             # scale
@@ -474,7 +521,7 @@ for selected_vid_idx in selected_vid_idxs:
                 generator = reader(chosen_frames)
             for abs_idx, chosen_f in tqdm(enumerate(chosen_frames)):
                 if use_parsed:
-                    multiseq_dir = args.out_dir[:args.out_dir.index("calib")]
+                    multiseq_dir = os.path.join(args.root_dir, args.seq_path, args.multisequence)
                     parsed_dir = os.path.join(multiseq_dir, "parsed")
                     timestamp_dir = os.path.join(parsed_dir, f"timestamp_{chosen_f}", "images")
                     frames = {}
@@ -534,7 +581,7 @@ for selected_vid_idx in selected_vid_idxs:
                         vertices = np.concatenate((vertices_left_scaled, vertices_right_scaled), axis=0)
                         faces = np.concatenate((body_model_left.faces, body_model_right.faces+vertices_left_scaled.shape[0]), axis=0)
                         mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-                        outdir = os.path.join(output_path, f'meshes/{str(selected_vid_idx).zfill(3)}')
+                        outdir = os.path.join(args.out_dir, f'meshes/{str(selected_vid_idx).zfill(3)}')
                         os.makedirs(outdir, exist_ok=True)
                         outname = os.path.join(outdir, '{:08d}.obj'.format(nf))
                         mesh.export(outname)
