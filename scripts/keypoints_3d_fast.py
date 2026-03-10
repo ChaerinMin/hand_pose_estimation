@@ -30,7 +30,6 @@ parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove
 parser.add_argument("--ignore_missing_tip", action="store_true", help="Should a missing fingertip be allowed")
 parser.add_argument("--confidence_thresh", type=float, default=None, help="camera conficence")
 parser.add_argument("--optimize_bad_views", action="store_true", help="Whether to optimize extrinsics of bad views")
-parser.add_argument("--setting", type=str, choices=["brics-mini", "brics-studio", "brics-mobile"])
 args = parser.parse_args()
 
 
@@ -227,7 +226,7 @@ for selected_vid_idx in selected_vid_idxs:
                     keypoints3d_right, residuals = triangulate_joints(np.asarray(keypoints2d_right)[valid_right], np.asarray(projs)[valid_right], processor=ransac_processor, residual_threshold=10, min_samples=5)
                     print(f"Error: {residuals.mean()}")
                 else:
-                    triangulation = SimpleTriangulate("iterative")
+                    triangulation = SimpleTriangulate("ransac")
                     valid_cameras = {}
                     for k_cam in cameras:
                         if k_cam == "names":

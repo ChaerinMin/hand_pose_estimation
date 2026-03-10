@@ -171,7 +171,6 @@ def main():
     parser.add_argument('--remove_side_cam', type=bool, default=True, help='Remove Side Cameras')
     parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove Bottom Cameras')
     parser.add_argument('--use_hamer', type=bool, default=True, help='YOLO -> ViTPose -> Hamer pipeline')
-    parser.add_argument("--setting", type=str, choices=["brics-mini", "brics-studio", "brics-mobile"])
     args = parser.parse_args()
     os.system("module load ffmpeg")
 

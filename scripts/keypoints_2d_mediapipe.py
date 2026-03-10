@@ -76,7 +76,6 @@ def main():
     parser.add_argument('--box_score_threshold', type=float, default=0.2, help='Confidence Threshold for BBX Detection')
     parser.add_argument('--remove_side_cam', type=bool, default=True, help='Remove Side Cameras')
     parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove Bottom Cameras')
-    parser.add_argument("--setting", type=str, choices=["brics-mini", "brics-studio", "brics-mobile"])
     args = parser.parse_args()
     os.system("module load ffmpeg")
     input_path = os.path.join(args.root_dir, args.seq_path)

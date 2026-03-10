@@ -114,7 +114,6 @@ parser.add_argument(
     "--collage_only", action="store_true",
     help="If true, only create the collage video from existing per-camera videos"
 )
-parser.add_argument("--setting", type=str, choices=["brics-mini", "brics-studio", "brics-mobile"])
 args = parser.parse_args()
 
 # paths

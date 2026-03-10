@@ -183,7 +183,6 @@ def main():
     parser.add_argument("--confidence_thresh", type=float, default=None, help="Camera confidence threshold")
     parser.add_argument("--optimize_bad_views", action="store_true", help="Optimize extrinsics of bad views")
     # parser.add_argument("--vis_repro", action="store_true", help="Visualize reprojected 3D keypoints")
-    parser.add_argument("--setting", type=str, choices=["brics-mini", "brics-studio", "brics-mobile"])
     args = parser.parse_args()
 
     base_path = os.path.join(args.root_dir)

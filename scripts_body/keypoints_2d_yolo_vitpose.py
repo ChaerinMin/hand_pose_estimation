@@ -527,7 +527,6 @@ def main():
     parser.add_argument('--no_refine', action='store_true', help='Skip two-stage crop refinement for face/hands')
     # parser.add_argument('--vis', action='store_true', default=True, help='Create collage visualization video from all cameras')
     parser.add_argument('--vis_only', action='store_true', help='Only create visualization (skip keypoint extraction)')
-    parser.add_argument("--setting", type=str, choices=["brics-mini", "brics-studio", "brics-mobile"])
     args = parser.parse_args()
 
     device = torch.device('cuda')

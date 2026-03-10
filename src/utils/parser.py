@@ -24,3 +24,4 @@ def add_common_args(parser: ArgumentParser):
         default=2,
         help="1 is before undistort. 2 assumes already undistorted"
     )
+    parser.add_argument("--setting", type=str, choices=["brics-mini", "brics-studio", "brics-mobile"])
