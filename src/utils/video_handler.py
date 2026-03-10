@@ -66,6 +66,7 @@ def load_first_frame(path, use_parsed, args, intr=None, dist_intr=None, dist=Non
         orig_img: numpy array of the first frame
         im_h: image height
         im_w: image width
+        timestamp_name: name of the timestamp directory used (e.g. "timestamp_3"), or None for video input
     """
     if args.setting == "brics-mini":
         cam_name_slicer = slice(0, 21)
@@ -83,12 +84,19 @@ def load_first_frame(path, use_parsed, args, intr=None, dist_intr=None, dist=Non
         timestamp_dirs = natsort.natsorted(glob.glob(os.path.join(parsed_dir, "timestamp_*")))
 
         # Load first valid frame
+        # brics-studio: images may be missing from some timestamps, scan until found
+        # brics-mini: timestamp_0 always has all cameras, use it directly
         for k in range(len(timestamp_dirs)):
             img_path = os.path.join(timestamp_dirs[k], "images", f"{cam_name}.jpg")
-            # if os.path.exists(img_path):
+            if args.setting == "brics-mini":
+                frame = np.array(Image.open(img_path))
+                H, W, _ = frame.shape
+                return frame, H, W, os.path.basename(timestamp_dirs[k])
+            if not os.path.exists(img_path):
+                continue
             frame = np.array(Image.open(img_path))
             H, W, _ = frame.shape
-            return frame, H, W
+            return frame, H, W, os.path.basename(timestamp_dirs[k])
         raise ValueError(f"No valid frames found in {parsed_dir}")
     else:
         stream = cv2.VideoCapture(path)
@@ -105,7 +113,7 @@ def load_first_frame(path, use_parsed, args, intr=None, dist_intr=None, dist=Non
         H, W, _ = frame.shape
         stream.release()
 
-        return frame, H, W
+        return frame, H, W, None
 
 def create_video_writer(filename, frame_size, fps=30):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # Codec for MP4

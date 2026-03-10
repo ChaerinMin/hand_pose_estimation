@@ -239,6 +239,25 @@
             ]
         },
         {
+            "name": "Full Body 2D Mask",
+            "type": "debugpy",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "module": "scripts_body.mask_2d",
+            "justMyCode": false,
+            "args":[
+                "-r", "/oscar/data/ssrinath/public/brics-studio",
+                "-v", "/oscar/data/ssrinath/brics/non-pii/brics-studio",
+                "-o", "/oscar/data/ssrinath/public/brics-studio/2025-03-30/multisequence000001/outputs",
+                "-s", "2025-03-30",
+                "-m", "multisequence000001",
+                "--ith", "0",
+                "--len_timestep", "150",
+                // "--collage_only",
+                "--setting", "brics-studio"
+            ]
+        },
+        {
             "name": "Full Body 3D Triangulation",
             "type": "debugpy",
             "request": "launch",

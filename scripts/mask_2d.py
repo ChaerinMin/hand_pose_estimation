@@ -243,7 +243,7 @@ for selected_vid_idx in selected_vid_idxs:
             break
 
         # read first frame only
-        orig_img, im_h, im_w = load_first_frame(
+        orig_img, im_h, im_w, _ = load_first_frame(
             input_video_path, use_parsed, args, intrs[v_idx], dist_intrs[v_idx], dists[v_idx]
         )
         orig_image = Image.fromarray(orig_img)
