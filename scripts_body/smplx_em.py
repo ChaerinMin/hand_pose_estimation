@@ -332,7 +332,7 @@ else:
     params_txt = "params.txt"
 base_path = os.path.join(args.root_dir)
 image_dir = os.path.join(base_path, args.seq_path)
-output_path = args.out_dir
+output_path = os.path.join(args.out_dir, "hand")
 calib_dir = os.path.join(
     args.root_dir, args.seq_path, args.multisequence,
     "calib", f"stage{args.stage}", "sparse", "0"
@@ -477,8 +477,8 @@ for selected_vid_idx in selected_vid_idxs:
         continue
 
     # Keypoint paths
-    keypoints2d_dir = os.path.join(output_path, "keypoints_2d", str(selected_vid_idx).zfill(3))
-    keypoints3d_dir = os.path.join(output_path, "keypoints_3d", str(selected_vid_idx).zfill(3))
+    keypoints2d_dir = os.path.join(output_path, "intermediate", "keypoints_2d", str(selected_vid_idx).zfill(3))
+    keypoints3d_dir = os.path.join(output_path, "intermediate", "keypoints_3d", str(selected_vid_idx).zfill(3))
     keypt3d_file = os.path.join(keypoints3d_dir, "wholebody.jsonl")
 
     if not os.path.exists(keypt3d_file):
@@ -515,7 +515,7 @@ for selected_vid_idx in selected_vid_idxs:
     # Load body masks for mask-based shape refinement
     body_masks = None
     if args.refine_shape_with_mask:
-        mask_path = os.path.join(output_path, "mask_2d", str(selected_vid_idx).zfill(3), "body_masks.npz")
+        mask_path = os.path.join(output_path, "intermediate", "mask_2d", str(selected_vid_idx).zfill(3), "body_masks.npz")
         if os.path.exists(mask_path):
             print(f"Loading body masks from {mask_path}")
             mask_data = np.load(mask_path, allow_pickle=True)
@@ -651,7 +651,7 @@ for selected_vid_idx in selected_vid_idxs:
         # Build per-camera frame index: each camera's mask came from a specific timestamp.
         # Map that timestamp -> index in chosen_frames (i.e., index into params arrays).
         mask_data_ts = np.load(
-            os.path.join(output_path, "mask_2d", str(selected_vid_idx).zfill(3), "body_masks.npz"),
+            os.path.join(output_path, "intermediate", "mask_2d", str(selected_vid_idx).zfill(3), "body_masks.npz"),
             allow_pickle=True
         )
         cam_frame_indices = {}
@@ -704,7 +704,7 @@ for selected_vid_idx in selected_vid_idxs:
     for key in params_body:
         params_list[key] = params_body[key].tolist()
 
-    out_params_path = os.path.join(output_path, 'params', f'{str(selected_vid_idx).zfill(3)}.json')
+    out_params_path = os.path.join(output_path, 'smplx_params', f'{str(selected_vid_idx).zfill(3)}.json')
     os.makedirs(os.path.dirname(out_params_path), exist_ok=True)
     with open(out_params_path, "w") as f:
         ujson.dump(params_list, f)
@@ -713,17 +713,17 @@ for selected_vid_idx in selected_vid_idxs:
     # Visualization and mesh export
     if args.vis_smpl or args.save_mesh or args.vis_2d_repro or args.vis_3d_repro:
         # Setup output directories
-        if args.vis_smpl:
-            out_smpl_path = os.path.join(output_path, 'smpl', str(selected_vid_idx).zfill(3))
-            os.makedirs(out_smpl_path, exist_ok=True)
+        # if args.vis_smpl:
+        #     out_smpl_path = os.path.join(output_path, 'vis', 'smpl', str(selected_vid_idx).zfill(3))
+        #     os.makedirs(out_smpl_path, exist_ok=True)
         if args.vis_2d_repro:
-            out_2d_path = os.path.join(output_path, 'repro_2d', str(selected_vid_idx).zfill(3))
+            out_2d_path = os.path.join(output_path, 'vis', 'repro_2d', str(selected_vid_idx).zfill(3))
             os.makedirs(out_2d_path, exist_ok=True)
         if args.vis_3d_repro:
-            out_3d_path = os.path.join(output_path, 'repro_3d', str(selected_vid_idx).zfill(3))
+            out_3d_path = os.path.join(output_path, 'vis', 'repro_3d', str(selected_vid_idx).zfill(3))
             os.makedirs(out_3d_path, exist_ok=True)
 
-        out_joint_path = os.path.join(output_path, 'regress_joints', str(selected_vid_idx).zfill(3))
+        out_joint_path = os.path.join(output_path, 'vis', 'regress_joints', str(selected_vid_idx).zfill(3))
         os.makedirs(out_joint_path, exist_ok=True)
 
         nf = 0
@@ -762,32 +762,32 @@ for selected_vid_idx in selected_vid_idxs:
 
             if abs_idx % args.stride == 0:
                 # Visualize SMPL-X mesh
-                if args.vis_smpl:
-                    vertices = body_model(return_verts=True, return_tensor=False, **param_frame)
+                # if args.vis_smpl:
+                vertices = body_model(return_verts=True, return_tensor=False, **param_frame)
 
-                    # Scale vertices
-                    # Use MidHip as root (average of left_hip and right_hip in COCO-WholeBody)
-                    # COCO-WholeBody: left_hip=11, right_hip=12
-                    # root = (keypoints3d[abs_idx][11, :3] + keypoints3d[abs_idx][12, :3]) / 2
-                    vertices_scaled = (vertices - root[abs_idx:abs_idx+1]) * final_scale + root[abs_idx:abs_idx+1]
-                    vertices_scaled = vertices_scaled.squeeze(0)
+                # Scale vertices
+                # Use MidHip as root (average of left_hip and right_hip in COCO-WholeBody)
+                # COCO-WholeBody: left_hip=11, right_hip=12
+                # root = (keypoints3d[abs_idx][11, :3] + keypoints3d[abs_idx][12, :3]) / 2
+                vertices_scaled = (vertices - root[abs_idx:abs_idx+1]) * final_scale + root[abs_idx:abs_idx+1]
+                vertices_scaled = vertices_scaled.squeeze(0)
 
-                    image_vis, render_results = vis_smpl(
-                        args, vertices=vertices_scaled, faces=body_model.faces,
-                        images=images, nf=nf, cameras=cameras, add_back=True,
-                        out_dir=out_smpl_path, confident=confident
-                    )
-                    if abs_idx == 0:
-                        out_smpl = create_video_writer(
-                            out_smpl_path + ".mp4",
-                            (image_vis.shape[1], image_vis.shape[0]), fps=30
-                        )
-                    out_smpl.write(image_vis)
+                image_vis, render_results = vis_smpl(
+                    args, vertices=vertices_scaled, faces=body_model.faces,
+                    images=images, nf=nf, cameras=cameras, add_back=True,
+                    out_dir="", confident=confident, save_frames=False
+                )
+                # if abs_idx == 0:
+                #     out_smpl = create_video_writer(
+                #         out_smpl_path + ".mp4",
+                #         (image_vis.shape[1], image_vis.shape[0]), fps=30
+                #     )
+                # out_smpl.write(image_vis)
 
                 # Save mesh
                 if args.save_mesh:
                     mesh = trimesh.Trimesh(vertices=vertices_scaled, faces=body_model.faces)
-                    outdir = os.path.join(output_path, f'meshes/{str(selected_vid_idx).zfill(3)}')
+                    outdir = os.path.join(output_path, f'vis/meshes/{str(selected_vid_idx).zfill(3)}')
                     os.makedirs(outdir, exist_ok=True)
                     outname = os.path.join(outdir, '{:08d}.obj'.format(nf))
                     mesh.export(outname)
@@ -810,6 +810,7 @@ for selected_vid_idx in selected_vid_idxs:
                     out_3d.write(image_vis)
 
                 # Visualize regressed joints
+                # if args.vis_regressed_joints:
                 joints = body_model(return_verts=False, return_tensor=False, **param_frame)
                 joints_scaled = (joints - root[abs_idx:abs_idx+1]) * final_scale + root[abs_idx:abs_idx+1]
                 joints_scaled = joints_scaled.squeeze(0)
@@ -854,10 +855,10 @@ for selected_vid_idx in selected_vid_idxs:
             nf += 1
 
         # Release video writers
-        if args.vis_smpl:
-            out_smpl.release()
-            convert_video_ffmpeg(out_smpl_path + ".mp4")
-            print('SMPL video saved')
+        # if args.vis_smpl:
+        #     out_smpl.release()
+        #     convert_video_ffmpeg(out_smpl_path + ".mp4")
+        #     print('SMPL video saved')
         if args.vis_2d_repro:
             out_2d.release()
             convert_video_ffmpeg(out_2d_path + ".mp4")

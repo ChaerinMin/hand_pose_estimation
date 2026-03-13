@@ -149,8 +149,8 @@
                 // "-o", "/oscar/data/ssrinath/public/brics-mini/2026-01-15/multisequence000001/calib/stage2/sparse/0",
                 "-r", "/oscar/data/ssrinath/public/brics-mini",
                 "-v", "/oscar/data/ssrinath/brics/non-pii/brics-mini",
-                "-o", "/oscar/data/ssrinath/public/brics-mini/2026-01-15_safe/multisequence000001/outputs",
-                "-s", "2026-01-15_safe",
+                "-o", "/oscar/data/ssrinath/public/brics-mini/2026-01-15/multisequence000001/outputs",
+                "-s", "2026-01-15",
                 "-m", "multisequence000001",
                 "--ith", "0",
                 // "--start", "0",
@@ -212,8 +212,8 @@
                 // "--use_optim_params",
                 "--confidence_thresh", "100",
                 "--optimize_bad_views",
-                // "--refine_shape_with_mask",
-                "--subject_name", "chaerin"
+                "--refine_shape_with_mask",
+                "--subject_name", "chaerin_v2"
             ]
         },
         {

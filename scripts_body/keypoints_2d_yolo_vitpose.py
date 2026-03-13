@@ -368,7 +368,7 @@ def extract_keypoints(args, params, cam_names, cam_mapper,
                       cur_cam_names, reader, selected_vid_idx,
                       cpm, model, refine_crops):
     """Phase 1: Extract VitPose keypoints for all cameras."""
-    output_kps_path = f'{args.out_dir}/keypoints_2d/{selected_vid_idx:03d}'
+    output_kps_path = f'{args.out_dir}/intermediate/keypoints_2d/{selected_vid_idx:03d}'
     os.makedirs(output_kps_path, exist_ok=True)
 
     intrs, projs, dist_intrs, dists, cameras = get_projections(
@@ -389,7 +389,7 @@ def extract_keypoints(args, params, cam_names, cam_mapper,
         video_name = input_video_path.split('/')[-1].split('.')[0]
         output_kps_file = f"{output_kps_path}/{video_name}.jsonl"
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        vis_path = os.path.join(args.out_dir, 'vis_keypoints_2d', f'{selected_vid_idx:03d}', f"{video_name}.mp4")
+        vis_path = os.path.join(args.out_dir, 'vis', 'keypoints_2d', f'{selected_vid_idx:03d}', f"{video_name}.mp4")
         os.makedirs(os.path.dirname(vis_path), exist_ok=True)
         vis_writer = cv2.VideoWriter(vis_path, fourcc, 30, (im_w, im_h))
 
@@ -431,7 +431,7 @@ def extract_keypoints(args, params, cam_names, cam_mapper,
 def create_collage_video(args, params, cam_names, cam_mapper,
                          cur_cam_names, reader, selected_vid_idx):
     # read keypoints
-    output_kps_path = f'{args.out_dir}/keypoints_2d/{selected_vid_idx:03d}'
+    output_kps_path = f'{args.out_dir}/intermediate/keypoints_2d/{selected_vid_idx:03d}'
     cam_keypoints = {}
     cam_video_paths = {}
     for v_idx, input_video_path in enumerate(reader.vids):
@@ -486,7 +486,7 @@ def create_collage_video(args, params, cam_names, cam_mapper,
     # video writer
     collage_w = scaled_w * grid_cols
     collage_h = scaled_h * grid_rows
-    vis_dir = os.path.join(args.out_dir, 'vis_keypoints_2d', f'{selected_vid_idx:03d}')
+    vis_dir = os.path.join(args.out_dir, 'vis', 'keypoints_2d', f'{selected_vid_idx:03d}')
     os.makedirs(vis_dir, exist_ok=True)
     vis_path = os.path.join(vis_dir, f"collage.mp4")
     vis_writer = create_video_writer(vis_path, (collage_w, collage_h), fps=30)
@@ -528,6 +528,7 @@ def main():
     # parser.add_argument('--vis', action='store_true', default=True, help='Create collage visualization video from all cameras')
     parser.add_argument('--vis_only', action='store_true', help='Only create visualization (skip keypoint extraction)')
     args = parser.parse_args()
+    args.out_dir = os.path.join(args.out_dir, "hand")
 
     device = torch.device('cuda')
     input_path = os.path.join(args.root_dir, args.seq_path)

@@ -172,6 +172,7 @@ def main():
     parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove Bottom Cameras')
     parser.add_argument('--use_hamer', type=bool, default=True, help='YOLO -> ViTPose -> Hamer pipeline')
     args = parser.parse_args()
+    args.out_dir = os.path.join(args.out_dir, "hand")
     os.system("module load ffmpeg")
 
     # Setup HaMeR model
@@ -251,10 +252,10 @@ def main():
     for selected_vid_idx in selected_vid_idxs:
         print(f'Video ID {selected_vid_idx}...')
         
-        output_kps_left_path = f'{args.out_dir}/keypoints_2d/left/{selected_vid_idx:03d}'
-        output_bbx_left_path = f'{args.out_dir}/bboxes/left/{selected_vid_idx:03d}'
-        output_kps_right_path = f'{args.out_dir}/keypoints_2d/right/{selected_vid_idx:03d}'
-        output_bbx_right_path = f'{args.out_dir}/bboxes/right/{selected_vid_idx:03d}'
+        output_kps_left_path = f'{args.out_dir}/intermediate/keypoints_2d/left/{selected_vid_idx:03d}'
+        output_bbx_left_path = f'{args.out_dir}/intermediate/bboxes/left/{selected_vid_idx:03d}'
+        output_kps_right_path = f'{args.out_dir}/intermediate/keypoints_2d/right/{selected_vid_idx:03d}'
+        output_bbx_right_path = f'{args.out_dir}/intermediate/bboxes/right/{selected_vid_idx:03d}'
         os.makedirs(output_kps_left_path, exist_ok=True)
         os.makedirs(output_bbx_left_path, exist_ok=True)
         os.makedirs(output_kps_right_path, exist_ok=True)

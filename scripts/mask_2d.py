@@ -119,7 +119,7 @@ args = parser.parse_args()
 # paths
 base_path = os.path.join(args.root_dir)
 image_base = os.path.join(base_path, args.seq_path)
-output_path = args.out_dir
+output_path = os.path.join(args.out_dir, "hand")
 
 # load cameras
 if args.use_optim_params:
@@ -220,7 +220,7 @@ for selected_vid_idx in selected_vid_idxs:
     print("Reader Length", len(reader.vids))
 
     # output dirs
-    mask_dir = os.path.join(output_path, "mask_2d", str(selected_vid_idx).zfill(3))
+    mask_dir = os.path.join(output_path, "intermediate", "mask_2d", str(selected_vid_idx).zfill(3))
     os.makedirs(mask_dir, exist_ok=True)
 
     # Store visualization images for collage
@@ -427,7 +427,7 @@ for selected_vid_idx in selected_vid_idxs:
             ax.axis('off')
 
         plt.tight_layout()
-        collage_path = os.path.join(output_path, "mask_2d", f"collage_{str(selected_vid_idx).zfill(3)}.png")
+        collage_path = os.path.join(output_path, "intermediate", "mask_2d", f"collage_{str(selected_vid_idx).zfill(3)}.png")
         plt.savefig(collage_path, dpi=150, bbox_inches='tight')
         plt.close(fig_grid)
         print(f"Saved collage: {collage_path}")

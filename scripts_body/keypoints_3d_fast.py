@@ -187,7 +187,7 @@ def main():
 
     base_path = os.path.join(args.root_dir)
     image_base = os.path.join(base_path, args.seq_path)
-    output_path = args.out_dir
+    output_path = os.path.join(args.out_dir, "hand")
 
     # Load camera parameters
     if args.use_optim_params:
@@ -256,7 +256,7 @@ def main():
     for selected_vid_idx in selected_vid_idxs:
         print(f'Video ID {selected_vid_idx}...')
 
-        keypoints2d_dir = os.path.join(output_path, "keypoints_2d", str(selected_vid_idx).zfill(3))
+        keypoints2d_dir = os.path.join(output_path, "intermediate", "keypoints_2d", str(selected_vid_idx).zfill(3))
         if not os.path.exists(keypoints2d_dir):
             print(f"Keypoints directory not found: {keypoints2d_dir}")
             continue

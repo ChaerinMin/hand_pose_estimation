@@ -31,6 +31,7 @@ parser.add_argument("--ignore_missing_tip", action="store_true", help="Should a 
 parser.add_argument("--confidence_thresh", type=float, default=None, help="camera conficence")
 parser.add_argument("--optimize_bad_views", action="store_true", help="Whether to optimize extrinsics of bad views")
 args = parser.parse_args()
+args.out_dir = os.path.join(args.out_dir, "hand")
 
 
 base_path = os.path.join(args.root_dir)
@@ -104,8 +105,8 @@ if args.confidence_thresh is not None:
 for selected_vid_idx in selected_vid_idxs:
     print(f'Video ID {selected_vid_idx}...')
     
-    keypoints2d_dir_right = os.path.join(args.out_dir, "keypoints_2d", "right", str(selected_vid_idx).zfill(3))
-    keypoints2d_dir_left = os.path.join(args.out_dir, "keypoints_2d", "left",  str(selected_vid_idx).zfill(3))
+    keypoints2d_dir_right = os.path.join(args.out_dir, "intermediate", "keypoints_2d", "right", str(selected_vid_idx).zfill(3))
+    keypoints2d_dir_left = os.path.join(args.out_dir, "intermediate", "keypoints_2d", "left",  str(selected_vid_idx).zfill(3))
 
     if args.video_dir:
         video_dir = os.path.join(args.video_dir, args.seq_path)
@@ -127,7 +128,7 @@ for selected_vid_idx in selected_vid_idxs:
     print("Total frames", reader.frame_count)
     intrs, projs, dist_intrs, dists, cameras = get_projections(args, params, cur_cam_names, cam_mapper, easymocap_format=True)
     
-    keypoints3d_dir = os.path.join(args.out_dir, "keypoints_3d", str(selected_vid_idx).zfill(3))
+    keypoints3d_dir = os.path.join(args.out_dir, "intermediate", "keypoints_3d", str(selected_vid_idx).zfill(3))
     try:
         shutil.rmtree(keypoints3d_dir)
     except FileNotFoundError:

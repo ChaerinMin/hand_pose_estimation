@@ -109,6 +109,7 @@ output.add_argument('--save_frame', action='store_true')
 output.add_argument('--save_mesh', action='store_true')
 output.add_argument("--confidence_thresh", type=float, default=None, help="camera conficence")
 args = parser.parse_args()
+args.out_dir = os.path.join(args.out_dir, "hand")
 
 
 # root paths
@@ -207,11 +208,11 @@ for selected_vid_idx in selected_vid_idxs:
         continue
     
     # 2d/3d keypoint paths
-    keypoints2d_dir_right = os.path.join(args.out_dir, "keypoints_2d", "right", str(selected_vid_idx).zfill(3))
-    keypoints2d_dir_left = os.path.join(args.out_dir, "keypoints_2d", "left",  str(selected_vid_idx).zfill(3))
-    bboxes_dir_right = os.path.join(args.out_dir, "bboxes", "right",  str(selected_vid_idx).zfill(3))
-    bboxes_dir_left = os.path.join(args.out_dir, "bboxes", "left",  str(selected_vid_idx).zfill(3))
-    keypoints3d_dir = os.path.join(args.out_dir, "keypoints_3d", str(selected_vid_idx).zfill(3))
+    keypoints2d_dir_right = os.path.join(args.out_dir, "intermediate", "keypoints_2d", "right", str(selected_vid_idx).zfill(3))
+    keypoints2d_dir_left = os.path.join(args.out_dir, "intermediate", "keypoints_2d", "left",  str(selected_vid_idx).zfill(3))
+    bboxes_dir_right = os.path.join(args.out_dir, "intermediate", "bboxes", "right",  str(selected_vid_idx).zfill(3))
+    bboxes_dir_left = os.path.join(args.out_dir, "intermediate", "bboxes", "left",  str(selected_vid_idx).zfill(3))
+    keypoints3d_dir = os.path.join(args.out_dir, "intermediate", "keypoints_3d", str(selected_vid_idx).zfill(3))
     keypt3d_file_left = os.path.join(keypoints3d_dir, "left.jsonl")
     keypt3d_file_right = os.path.join(keypoints3d_dir, "right.jsonl")
 
@@ -292,7 +293,7 @@ for selected_vid_idx in selected_vid_idxs:
     hand_masks = None
     seg_status = {}
     if args.refine_shape_with_mask:
-        mask_dir = os.path.join(args.out_dir, "mask_2d", str(selected_vid_idx).zfill(3))
+        mask_dir = os.path.join(args.out_dir, "intermediate", "mask_2d", str(selected_vid_idx).zfill(3))
         mask_path = os.path.join(mask_dir, "hand_masks.npz")
         if os.path.exists(mask_path):
             print(f"Loading hand masks from {mask_path}")
@@ -462,39 +463,39 @@ for selected_vid_idx in selected_vid_idxs:
             params_right_list[key] = params_right[key].tolist()
         manos_params['left'] = params_left_list
         manos_params['right'] = params_right_list
-        outhand_mano_params_path = f'{args.out_dir}/params/{str(selected_vid_idx).zfill(3)}.json'
+        outhand_mano_params_path = f'{args.out_dir}/mano_params/{str(selected_vid_idx).zfill(3)}.json'
         os.makedirs(os.path.dirname(outhand_mano_params_path), exist_ok=True)
         with open(outhand_mano_params_path, "w") as f:
             ujson.dump(manos_params, f)
         
         if args.vis_smpl or args.save_mesh or args.vis_2d_repro or args.vis_3d_repro:
             # save paths
-            if args.vis_smpl:
+            # if args.vis_smpl:
                 # if not args.save_frame:
                 #     os.makedirs(f'{args.out_dir}/mano', exist_ok=True)
-                #     outhand_mano_path = f'{args.out_dir}/mano/{str(selected_vid_idx).zfill(3)}.mp4'
+                #     outhand_mano_path = f'{args.out_dir}/vis/mano/{str(selected_vid_idx).zfill(3)}.mp4'
                 # else:
-                outhand_mano_path = f'{args.out_dir}/mano/{str(selected_vid_idx).zfill(3)}'
-                os.makedirs(outhand_mano_path, exist_ok=True)
+                # outhand_mano_path = f'{args.out_dir}/vis/mano/{str(selected_vid_idx).zfill(3)}'
+                # os.makedirs(outhand_mano_path, exist_ok=True)
             if args.vis_2d_repro:
                 # if not args.save_frame:
                     # os.makedirs(f'{args.out_dir}/repro_2d', exist_ok=True)
-                    # outhand_2d_path = f'{args.out_dir}/repro_2d/{str(selected_vid_idx).zfill(3)}.mp4'
+                    # outhand_2d_path = f'{args.out_dir}/vis/repro_2d/{str(selected_vid_idx).zfill(3)}.mp4'
                 # else:
-                outhand_2d_path = f'{args.out_dir}/repro_2d/{str(selected_vid_idx).zfill(3)}'
+                outhand_2d_path = f'{args.out_dir}/vis/repro_2d/{str(selected_vid_idx).zfill(3)}'
                 os.makedirs(outhand_2d_path, exist_ok=True)
             if args.vis_3d_repro:
                 # if not args.save_frame:
                 #     os.makedirs(f'{args.out_dir}/repro_3d', exist_ok=True)
-                #     outhand_3d_path = f'{args.out_dir}/repro_3d/{str(selected_vid_idx).zfill(3)}.mp4'
+                #     outhand_3d_path = f'{args.out_dir}/vis/repro_3d/{str(selected_vid_idx).zfill(3)}.mp4'
                 # else:
-                outhand_3d_path = f'{args.out_dir}/repro_3d/{str(selected_vid_idx).zfill(3)}'
+                outhand_3d_path = f'{args.out_dir}/vis/repro_3d/{str(selected_vid_idx).zfill(3)}'
                 os.makedirs(outhand_3d_path, exist_ok=True)
             # if not args.save_frame:
             #     os.makedirs(f'{args.out_dir}/regress_joints', exist_ok=True)
-            #     outjoint_3d_path = f'{args.out_dir}/regress_joints/{str(selected_vid_idx).zfill(3)}.mp4'
+            #     outjoint_3d_path = f'{args.out_dir}/vis/regress_joints/{str(selected_vid_idx).zfill(3)}.mp4'
             # else:
-            outjoint_3d_path = f'{args.out_dir}/regress_joints/{str(selected_vid_idx).zfill(3)}'
+            outjoint_3d_path = f'{args.out_dir}/vis/regress_joints/{str(selected_vid_idx).zfill(3)}'
             os.makedirs(outjoint_3d_path, exist_ok=True)
 
             # scale
@@ -568,19 +569,20 @@ for selected_vid_idx in selected_vid_idxs:
                         faces = np.concatenate((body_model_left.faces, body_model_right.faces+vertices_left_scaled.shape[0]), axis=0)
                         image_vis, render_results = vis_smpl(
                             args, vertices=vertices, faces=faces, images=images, 
-                            nf=nf, cameras=cameras, add_back=True, out_dir=outhand_mano_path,
-                            confident=confident
+                            nf=nf, cameras=cameras, add_back=True, out_dir="",
+                            confident=confident, save_frames=False
                         )
-                        if abs_idx == 0:
-                            outhand_mano = create_video_writer(outhand_mano_path+".mp4", (image_vis.shape[1], image_vis.shape[0]), fps=30)
-                        outhand_mano.write(image_vis)
+                        # if args.vis_smpl:
+                        #     if abs_idx == 0:
+                        #         outhand_mano = create_video_writer(outhand_mano_path+".mp4", (image_vis.shape[1], image_vis.shape[0]), fps=30)
+                        #     outhand_mano.write(image_vis)
 
                     # save the mesh as obj
                     if args.save_mesh:
                         vertices = np.concatenate((vertices_left_scaled, vertices_right_scaled), axis=0)
                         faces = np.concatenate((body_model_left.faces, body_model_right.faces+vertices_left_scaled.shape[0]), axis=0)
                         mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
-                        outdir = os.path.join(args.out_dir, f'meshes/{str(selected_vid_idx).zfill(3)}')
+                        outdir = os.path.join(args.out_dir, f'vis/meshes/{str(selected_vid_idx).zfill(3)}')
                         os.makedirs(outdir, exist_ok=True)
                         outname = os.path.join(outdir, '{:08d}.obj'.format(nf))
                         mesh.export(outname)
@@ -597,19 +599,18 @@ for selected_vid_idx in selected_vid_idxs:
                             outhand_3d = create_video_writer(outhand_3d_path+".mp4", (image_vis.shape[1], image_vis.shape[0]), fps=30)
                         outhand_3d.write(image_vis)
 
-                    vis_regressed_joints = True
-                    if vis_regressed_joints:
-                        joints_right = body_model_right(return_verts=False, return_tensor=False, **param_right)
-                        joints_left = body_model_left(return_verts=False, return_tensor=False, **param_left)
-                        joints_right = (joints_right[0] - root_right) * final_scale_right + root_right
-                        joints_left = (joints_left[0] - root_left) * final_scale_left + root_left
-                        joints = np.concatenate((joints_left, joints_right), axis=0)
-                        joints_repro = projectN3(joints, projs)
-                        joints_repro[:, :, 2] = 0.5
-                        image_vis = vis_repro(args, render_results, joints_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outjoint_3d_path, cameras=cameras, confident=confident)
-                        if abs_idx == 0:
-                            outjoint_3d = create_video_writer(outjoint_3d_path+".mp4", (image_vis.shape[1], image_vis.shape[0]), fps=30)
-                        outjoint_3d.write(image_vis)
+                    # if args.vis_regressed_joints:
+                    joints_right = body_model_right(return_verts=False, return_tensor=False, **param_right)
+                    joints_left = body_model_left(return_verts=False, return_tensor=False, **param_left)
+                    joints_right = (joints_right[0] - root_right) * final_scale_right + root_right
+                    joints_left = (joints_left[0] - root_left) * final_scale_left + root_left
+                    joints = np.concatenate((joints_left, joints_right), axis=0)
+                    joints_repro = projectN3(joints, projs)
+                    joints_repro[:, :, 2] = 0.5
+                    image_vis = vis_repro(args, render_results, joints_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outjoint_3d_path, cameras=cameras, confident=confident)
+                    if abs_idx == 0:
+                        outjoint_3d = create_video_writer(outjoint_3d_path+".mp4", (image_vis.shape[1], image_vis.shape[0]), fps=30)
+                    outjoint_3d.write(image_vis)
 
                     # overlay the 2D keypoints to image
                     if args.vis_2d_repro:
@@ -623,10 +624,10 @@ for selected_vid_idx in selected_vid_idxs:
 
             # save as video
             # if not args.save_frame:
-            if args.vis_smpl:
-                outhand_mano.release()
-                convert_video_ffmpeg(outhand_mano_path+".mp4")
-                print('Video Handler Released')
+            # if args.vis_smpl:
+            #     outhand_mano.release()
+            #     convert_video_ffmpeg(outhand_mano_path+".mp4")
+            #     print('Video Handler Released')
             if args.vis_2d_repro:
                 outhand_2d.release()
                 convert_video_ffmpeg(outhand_2d_path+".mp4")

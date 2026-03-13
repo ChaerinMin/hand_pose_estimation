@@ -85,7 +85,7 @@ def main():
     # paths
     base_path = args.root_dir
     image_base = os.path.join(base_path, args.seq_path)
-    output_path = args.out_dir
+    output_path = os.path.join(args.out_dir, "hand")
 
     # load cameras
     params_txt = "optim_params.txt" if args.use_optim_params else "params.txt"
@@ -172,7 +172,7 @@ def main():
         )
         print("Total cams:", len(intrs))
 
-        mask_dir = os.path.join(output_path, "mask_2d", str(selected_vid_idx).zfill(3))
+        mask_dir = os.path.join(output_path, "intermediate", "mask_2d", str(selected_vid_idx).zfill(3))
         os.makedirs(mask_dir, exist_ok=True)
 
         collage_images = []
@@ -303,7 +303,7 @@ def main():
 
             plt.tight_layout()
             collage_path = os.path.join(
-                output_path, "mask_2d", f"collage_{str(selected_vid_idx).zfill(3)}.png"
+                output_path, "intermediate", "mask_2d", f"collage_{str(selected_vid_idx).zfill(3)}.png"
             )
             plt.savefig(collage_path, dpi=150, bbox_inches='tight')
             plt.close(fig_grid)

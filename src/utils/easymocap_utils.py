@@ -41,7 +41,7 @@ def load_model(gender='neutral', use_cuda=True, model_type='smpl', skel_type='bo
     body_model.to(device)
     return body_model
 
-def vis_smpl(args, vertices, faces, images, nf, cameras, mode='smpl', extra_data=[], add_back=True, out_dir='mano', confident=None):
+def vis_smpl(args, vertices, faces, images, nf, cameras, mode='smpl', extra_data=[], add_back=True, out_dir='mano', confident=None, save_frames=True):
     render_data = {}
     assert vertices.shape[1] == 3 and len(vertices.shape) == 2, 'shape {} != (N, 3)'.format(vertices.shape)
     pid = 0
@@ -50,9 +50,9 @@ def vis_smpl(args, vertices, faces, images, nf, cameras, mode='smpl', extra_data
     render = Renderer(height=1024, width=1024, faces=None)
     render_results = render.render(render_data, cameras, images, add_back=add_back, confident=confident)
     image_vis = merge(render_results, resize=not args.save_origin)
-    # if args.save_frame:
-    outname = os.path.join(out_dir, '{:08d}.jpg'.format(nf))
-    cv2.imwrite(outname, image_vis)
+    if save_frames:
+        outname = os.path.join(out_dir, '{:08d}.jpg'.format(nf))
+        cv2.imwrite(outname, image_vis)
     # else:
     #     out_dir.write(image_vis)
     return image_vis, render_results
