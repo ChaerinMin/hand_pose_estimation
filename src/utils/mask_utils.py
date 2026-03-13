@@ -101,17 +101,18 @@ def render_hand_silhouette_differentiable(
         device=device,
     )
 
-    # Rasterization settings for soft silhouette
+    sigma = 1e-3
     raster_settings = RasterizationSettings(
         image_size=(img_height, img_width),
-        blur_radius=np.log(1.0 / 1e-4 - 1.0) * 1e-5,  # soft edges for gradient flow
-        faces_per_pixel=50,
+        blur_radius=np.log(1.0 / 1e-4 - 1.0) * sigma,
+        faces_per_pixel=5,
+        bin_size=0,  # naive rasterizer: avoids bin overflow warnings
     )
 
     # Create silhouette renderer
     renderer = MeshRenderer(
         rasterizer=MeshRasterizer(cameras=cameras, raster_settings=raster_settings),
-        shader=SoftSilhouetteShader(blend_params=BlendParams(sigma=1e-4)),
+        shader=SoftSilhouetteShader(blend_params=BlendParams(sigma=sigma)),
     )
 
     # Render silhouette

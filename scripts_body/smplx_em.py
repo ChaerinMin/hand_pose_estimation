@@ -37,6 +37,7 @@ from src.utils.cameras import (get_projections, map_camera_names,
 from src.utils.easymocap_utils import (load_model, projectN3, vis_repro,
                                        vis_smpl)
 from src.utils.filter import apply_one_euro_filter_2d, apply_one_euro_filter_3d
+from src.utils.mask_optimize import refine_shape_with_mask
 from src.utils.parser import add_common_args
 from src.utils.reader_v2 import Reader
 from src.utils.video_handler import convert_video_ffmpeg, create_video_writer
@@ -317,6 +318,8 @@ output.add_argument('--vis_smpl', action='store_true')
 output.add_argument('--save_frame', action='store_true')
 output.add_argument('--save_mesh', action='store_true')
 output.add_argument("--confidence_thresh", type=float, default=None, help="Camera confidence")
+output.add_argument("--refine_shape_with_mask", action="store_true", help="Refine SMPL-X shape parameters using body masks from mask_2d")
+output.add_argument("--subject_name", type=str, default=None, help="If refine_shape_with_mask, save betas with subject_name. If not, load betas with subject_name.")
 args = parser.parse_args()
 
 
@@ -509,6 +512,36 @@ for selected_vid_idx in selected_vid_idxs:
         args, params, cur_cam_names, cam_mapper, easymocap_format=True
     )
 
+    # Load body masks for mask-based shape refinement
+    body_masks = None
+    if args.refine_shape_with_mask:
+        mask_path = os.path.join(output_path, "mask_2d", str(selected_vid_idx).zfill(3), "body_masks.npz")
+        if os.path.exists(mask_path):
+            print(f"Loading body masks from {mask_path}")
+            mask_data = np.load(mask_path, allow_pickle=True)
+            body_masks = {}
+            for cam in cur_cam_names:
+                if cam in cam_mapper and cam in mask_data:
+                    body_masks[cam] = mask_data[cam]
+            print(f"  - Loaded masks for {len(body_masks)} cameras")
+        else:
+            raise FileNotFoundError(f"Body masks not found at {mask_path}. Please run scripts_body/mask_2d.py first.")
+
+    # Load personalized shape parameters if subject_name given without refine_shape_with_mask
+    init_shapes = None
+    if not args.refine_shape_with_mask and args.subject_name is not None:
+        shape_save_path = os.path.join(args.root_dir, "personalized_shapes_body.json")
+        if os.path.exists(shape_save_path):
+            with open(shape_save_path, "r") as f:
+                all_shapes = json.load(f)
+            if args.subject_name in all_shapes:
+                init_shapes = np.array(all_shapes[args.subject_name]).reshape(1, -1)
+                print(f"Loaded personalized SMPL-X shapes for subject '{args.subject_name}'")
+            else:
+                print(f"Warning: Subject '{args.subject_name}' not found in {shape_save_path}")
+        else:
+            print(f"Warning: Shape file not found at {shape_save_path}")
+
     # Load 2D keypoints
     all_keypoints2d = []
     for cam in cur_cam_names:
@@ -607,8 +640,57 @@ for selected_vid_idx in selected_vid_idxs:
             body_model, keypoints3d_scaled,
             config=dataset_config, args=args,
             weight_shape={'s3d': 1e5, 'reg_shapes': 1e2},
-            weight_pose=weight_pose
+            weight_pose=weight_pose,
+            init_shapes=init_shapes
         )
+
+    # Refine SMPL-X shape parameters with body masks
+    if args.refine_shape_with_mask and body_masks is not None and len(body_masks) > 0:
+        print("Refining SMPL-X shape parameters with body masks...")
+
+        # Build per-camera frame index: each camera's mask came from a specific timestamp.
+        # Map that timestamp -> index in chosen_frames (i.e., index into params arrays).
+        mask_data_ts = np.load(
+            os.path.join(output_path, "mask_2d", str(selected_vid_idx).zfill(3), "body_masks.npz"),
+            allow_pickle=True
+        )
+        cam_frame_indices = {}
+        for cam in cur_cam_names:
+            ts_key = f"{cam}_timestamp"
+            if ts_key in mask_data_ts:
+                ts_name = str(mask_data_ts[ts_key])  # e.g. "timestamp_7"
+                if ts_name.startswith("timestamp_"):
+                    abs_frame = int(ts_name.split("_")[1])
+                    if abs_frame in chosen_frames:
+                        cam_frame_indices[cam] = chosen_frames.index(abs_frame)
+                    else:
+                        # Use closest available frame
+                        closest = min(range(len(chosen_frames)),
+                                      key=lambda k: abs(chosen_frames[k] - abs_frame))
+                        cam_frame_indices[cam] = closest
+
+        params_body = refine_shape_with_mask(
+            body_model, params_body, body_masks, cameras,
+            cur_cam_names, cam_mapper, intrs, final_scale, keypoints3d_scaled[0],
+            hand_side="body",
+            weight_loss={'mask': 1e4, 'reg_shapes': 1e0, 'init_shape': 5e1},
+            max_iter=20, verbose=True,
+            cam_frame_indices=cam_frame_indices,
+            kp3d_all=keypoints3d_scaled,
+            overflow_weight=0.1, underflow_weight=2.0
+        )
+        # Save personalized SMPL-X shape with subject_name
+        if args.subject_name is not None:
+            shape_save_path = os.path.join(args.root_dir, "personalized_shapes_body.json")
+            if os.path.exists(shape_save_path):
+                with open(shape_save_path, "r") as f:
+                    current_persons = json.load(f)
+            else:
+                current_persons = {}
+            current_persons[args.subject_name] = params_body['shapes'].squeeze(0).tolist()
+            with open(shape_save_path, "w") as f:
+                json.dump(current_persons, f, indent=4)
+            print(f"Saved personalized SMPL-X shapes for subject '{args.subject_name}' to {shape_save_path}")
 
     # Smooth SMPL-X parameters if requested
     if args.to_smooth and len(params_body['Rh']) > 3:
