@@ -216,15 +216,17 @@ for selected_vid_idx in selected_vid_idxs:
     keypt3d_file_left = os.path.join(keypoints3d_dir, "left.jsonl")
     keypt3d_file_right = os.path.join(keypoints3d_dir, "right.jsonl")
 
+    # Always read chosen_frames_* for per-hand validity check
+    chosen_path_left = os.path.join(keypoints3d_dir, "chosen_frames_left.json")
+    chosen_path_right = os.path.join(keypoints3d_dir, "chosen_frames_right.json")
+    with open(chosen_path_right, "r") as f:
+        chosen_frames_right = json.load(f)
+    with open(chosen_path_left, "r") as f:
+        chosen_frames_left = json.load(f)
+
     # fileter out some frames
     if args.use_filtered:
-        chosen_path_left = os.path.join(keypoints3d_dir, "chosen_frames_left.json")
-        chosen_path_right = os.path.join(keypoints3d_dir, "chosen_frames_right.json")
-        with open(chosen_path_right, "r") as f:
-            chosen_frames_right = set(json.load(f))
-        with open(chosen_path_left, "r") as f:
-            chosen_frames_left = set(json.load(f))
-        chosen_frames =list(set(chosen_frames_right | chosen_frames_left))
+        chosen_frames = list(set(chosen_frames_right) | set(chosen_frames_left))
     else:
         chosen_frames = range(args.start, args.end, args.stride)
     chosen_frames = sorted(chosen_frames)
@@ -280,14 +282,33 @@ for selected_vid_idx in selected_vid_idxs:
         all_keypoints2d_right[nf, :, :, :2] = param_utils.undistort_points(all_keypoints2d_right[nf, :, :, :2], intrs, dists, dist_intrs)
         
     # load 3d keypoints
+    # For visualization: load for the full union of chosen frames
+    # For MANO fitting: load only each hand's own quality-checked frames so that
+    # frames where the hand is absent (zeros / garbage) are never passed to the fitter.
+    chosen_frames_right_set = set(chosen_frames_right)
+    chosen_frames_left_set = set(chosen_frames_left)
     keypoints3d_right, keypoints3d_left = [], []
+    keypoints3d_right_mano, keypoints3d_left_mano = [], []
     with open(keypt3d_file_left, "r") as fl, open(keypt3d_file_right, "r") as fr:
         for l_idx, (linel, liner) in enumerate(zip(fl, fr)):
             if l_idx in chosen_frames:
-                keypoints3d_left.append(np.array(ujson.loads(linel)).reshape(-1, 4))
-                keypoints3d_right.append(np.array(ujson.loads(liner)).reshape(-1, 4))
+                kp_left = np.array(ujson.loads(linel)).reshape(-1, 4)
+                kp_right = np.array(ujson.loads(liner)).reshape(-1, 4)
+                keypoints3d_left.append(kp_left)
+                keypoints3d_right.append(kp_right)
+            if l_idx in chosen_frames_left_set:
+                keypoints3d_left_mano.append(np.array(ujson.loads(linel)).reshape(-1, 4))
+            if l_idx in chosen_frames_right_set:
+                keypoints3d_right_mano.append(np.array(ujson.loads(liner)).reshape(-1, 4))
     keypoints3d_left = np.asarray(keypoints3d_left)
     keypoints3d_right = np.asarray(keypoints3d_right)
+    keypoints3d_left_mano = np.asarray(keypoints3d_left_mano) if keypoints3d_left_mano else np.zeros((0, 21, 4))
+    keypoints3d_right_mano = np.asarray(keypoints3d_right_mano) if keypoints3d_right_mano else np.zeros((0, 21, 4))
+
+    # A hand is valid only if it has quality-checked frames to fit MANO to.
+    right_valid = len(chosen_frames_right) > 0
+    left_valid = len(chosen_frames_left) > 0
+    print(f"Hand validity — right: {right_valid} ({len(chosen_frames_right)} frames), left: {left_valid} ({len(chosen_frames_left)} frames)")
 
     # load hand masks if refine_shape_with_mask is enabled
     hand_masks = None
@@ -349,7 +370,7 @@ for selected_vid_idx in selected_vid_idxs:
 
     # fit mano
     dataset_config = CONFIG[args.body]
-    if len(keypoints3d_right.shape) == 3:
+    if right_valid or left_valid:
         # smooth keypoints
         if args.to_smooth:
             print('Smoothing Keypoints 3D...')
@@ -363,13 +384,21 @@ for selected_vid_idx in selected_vid_idxs:
             'reg_poses': 5e-5, 'smooth_body': 1e1, 'smooth_poses': 5.0,
             # 'reg_poses': 0.0, 'smooth_body': 0.0, 'smooth_poses': 0.0
         }
-        # Estimate global scale for observed keypoints -> model units and create scaled copies
-        s_right = estimate_scale_from_keypoints(body_model_right, keypoints3d_right, kintree=dataset_config.get('kintree', None))
-        s_left = estimate_scale_from_keypoints(body_model_left, keypoints3d_left, kintree=dataset_config.get('kintree', None))
-        keypoints3d_right_scaled = apply_scale_to_keypoints(keypoints3d_right, s_right)
-        keypoints3d_left_scaled = apply_scale_to_keypoints(keypoints3d_left, s_left)
-        final_scale_right = 1.0 / s_right
-        final_scale_left = 1.0 / s_left
+        # Estimate global scale from per-hand quality-checked frames only,
+        # but apply scale to the full union array so params have N_total frames
+        # and select_nf works correctly in the visualization loop.
+        if right_valid:
+            s_right = estimate_scale_from_keypoints(body_model_right, keypoints3d_right_mano, kintree=dataset_config.get('kintree', None))
+            keypoints3d_right_mano_scaled = apply_scale_to_keypoints(keypoints3d_right_mano, s_right)
+            final_scale_right = 1.0 / s_right
+        else:
+            final_scale_right = 1.0
+        if left_valid:
+            s_left = estimate_scale_from_keypoints(body_model_left, keypoints3d_left_mano, kintree=dataset_config.get('kintree', None))
+            keypoints3d_left_mano_scaled = apply_scale_to_keypoints(keypoints3d_left_mano, s_left)
+            final_scale_left = 1.0 / s_left
+        else:
+            final_scale_left = 1.0
         # Load personalized shape parameters if subject_name is given without refine_shape_with_mask
         init_shapes_right = None
         init_shapes_left = None
@@ -380,8 +409,10 @@ for selected_vid_idx in selected_vid_idxs:
                     all_shapes = json.load(f)
                 if args.subject_name in all_shapes:
                     subject_shapes = all_shapes[args.subject_name]
-                    init_shapes_right = np.array(subject_shapes["right"]).reshape(1, -1)
-                    init_shapes_left = np.array(subject_shapes["left"]).reshape(1, -1)
+                    if right_valid and "right" in subject_shapes:
+                        init_shapes_right = np.array(subject_shapes["right"]).reshape(1, -1)
+                    if left_valid and "left" in subject_shapes:
+                        init_shapes_left = np.array(subject_shapes["left"]).reshape(1, -1)
                     print(f"Loaded personalized shapes for subject '{args.subject_name}'")
                 else:
                     print(f"Warning: Subject '{args.subject_name}' not found in {shape_save_path}")
@@ -389,22 +420,28 @@ for selected_vid_idx in selected_vid_idxs:
                 print(f"Warning: Shape file not found at {shape_save_path}")
 
         fit_3d2d = False
+        params_right = None
+        params_left = None
         if fit_3d2d:
-            params_right = smpl_from_keypoints3d2d(
-                body_model_right, keypoints3d_right_scaled, all_keypoints2d_right, all_bboxes_right, projs,
-                config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose
-            )
-            params_left = smpl_from_keypoints3d2d(
-                body_model_left, keypoints3d_left_scaled, all_keypoints2d_left, all_bboxes_left, projs,
-                config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose
-            )
+            if right_valid:
+                params_right = smpl_from_keypoints3d2d(
+                    body_model_right, keypoints3d_right_mano_scaled, all_keypoints2d_right, all_bboxes_right, projs,
+                    config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose
+                )
+            if left_valid:
+                params_left = smpl_from_keypoints3d2d(
+                    body_model_left, keypoints3d_left_mano_scaled, all_keypoints2d_left, all_bboxes_left, projs,
+                    config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 5e3}, weight_pose=weight_pose
+                )
         else:
-            params_right = smpl_from_keypoints3d(body_model_right, keypoints3d_right_scaled,
-                config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 1e2}, weight_pose=weight_pose,
-                init_shapes=init_shapes_right) # 5e3
-            params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left_scaled,
-                config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 1e2}, weight_pose=weight_pose,
-                init_shapes=init_shapes_left)
+            if right_valid:
+                params_right = smpl_from_keypoints3d(body_model_right, keypoints3d_right_mano_scaled,
+                    config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 1e2}, weight_pose=weight_pose,
+                    init_shapes=init_shapes_right) # 5e3
+            if left_valid:
+                params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left_mano_scaled,
+                    config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 1e2}, weight_pose=weight_pose,
+                    init_shapes=init_shapes_left)
 
         # hand masks --> shape (beta)
         if args.refine_shape_with_mask and hand_masks is not None:
@@ -412,21 +449,23 @@ for selected_vid_idx in selected_vid_idxs:
             from src.utils.mask_optimize import refine_shape_with_mask
 
             # Right hand's shape (beta)
-            params_right = refine_shape_with_mask(
-                body_model_right, params_right, hand_masks, cameras,
-                cur_cam_names, cam_mapper, intrs, final_scale_right, keypoints3d_right[0], hand_side="right",
-                # weight_loss={'mask': 1e4, 'reg_shapes': 1e1, 'init_shape': 5e1},  # 1e3 1e2 5e2
-                weight_loss={'mask': 1e4, 'reg_shapes': 0.5, 'init_shape': 0.0},  # 1e3 1e2 5e2
-                max_iter=20, verbose=True
-            )
+            if right_valid:
+                params_right = refine_shape_with_mask(
+                    body_model_right, params_right, hand_masks, cameras,
+                    cur_cam_names, cam_mapper, intrs, final_scale_right, keypoints3d_right_mano[0], hand_side="right",
+                    # weight_loss={'mask': 1e4, 'reg_shapes': 1e1, 'init_shape': 5e1},  # 1e3 1e2 5e2
+                    weight_loss={'mask': 1e4, 'reg_shapes': 0.5, 'init_shape': 0.0},  # 1e3 1e2 5e2
+                    max_iter=20, verbose=True
+                )
 
             # Left hand's shape (beta)
-            params_left = refine_shape_with_mask(
-                body_model_left, params_left, hand_masks, cameras,
-                cur_cam_names, cam_mapper, intrs, final_scale_left, keypoints3d_left[0], hand_side="left",
-                weight_loss={'mask': 1e4, 'reg_shapes': 0.5, 'init_shape': 0.0},
-                max_iter=20, verbose=True
-            )
+            if left_valid:
+                params_left = refine_shape_with_mask(
+                    body_model_left, params_left, hand_masks, cameras,
+                    cur_cam_names, cam_mapper, intrs, final_scale_left, keypoints3d_left_mano[0], hand_side="left",
+                    weight_loss={'mask': 1e4, 'reg_shapes': 0.5, 'init_shape': 0.0},
+                    max_iter=20, verbose=True
+                )
 
             # Save shape (beta) with subject's name
             shape_save_path = os.path.join(args.root_dir, "personlized_shapes.json")
@@ -436,33 +475,32 @@ for selected_vid_idx in selected_vid_idxs:
                     current_persons = json.load(f)
             else:
                 current_persons = {}
-            current_persons[args.subject_name] = {
-                "left": params_left['shapes'].squeeze(0).tolist(),
-                "right": params_right['shapes'].squeeze(0).tolist()
-            }
+            current_persons[args.subject_name] = {}
+            if left_valid:
+                current_persons[args.subject_name]["left"] = params_left['shapes'].squeeze(0).tolist()
+            if right_valid:
+                current_persons[args.subject_name]["right"] = params_right['shapes'].squeeze(0).tolist()
             with open(shape_save_path, "w") as f:
                 json.dump(current_persons, f, indent=4)
 
         # smooth mano parameters
         if args.to_smooth:
             print('Smoothing Manos...')
-            params_right['Rh'] = apply_one_euro_filter_2d(params_right['Rh'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
-            params_left['Rh'] = apply_one_euro_filter_2d(params_left['Rh'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
-            params_right['Th'] = apply_one_euro_filter_2d(params_right['Th'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
-            params_left['Th'] = apply_one_euro_filter_2d(params_left['Th'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
-            params_right['poses'] = apply_one_euro_filter_2d(params_right['poses'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
-            params_left['poses'] = apply_one_euro_filter_2d(params_left['poses'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+            if right_valid:
+                params_right['Rh'] = apply_one_euro_filter_2d(params_right['Rh'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+                params_right['Th'] = apply_one_euro_filter_2d(params_right['Th'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+                params_right['poses'] = apply_one_euro_filter_2d(params_right['poses'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+            if left_valid:
+                params_left['Rh'] = apply_one_euro_filter_2d(params_left['Rh'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+                params_left['Th'] = apply_one_euro_filter_2d(params_left['Th'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+                params_left['poses'] = apply_one_euro_filter_2d(params_left['poses'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
 
         # json dump mano
         manos_params = {}
-        params_left_list = {}
-        params_right_list = {}
-        for key in params_left:
-            params_left_list[key] = params_left[key].tolist()
-        for key in params_right:
-            params_right_list[key] = params_right[key].tolist()
-        manos_params['left'] = params_left_list
-        manos_params['right'] = params_right_list
+        if left_valid:
+            manos_params['left'] = {key: params_left[key].tolist() for key in params_left}
+        if right_valid:
+            manos_params['right'] = {key: params_right[key].tolist() for key in params_right}
         outhand_mano_params_path = f'{args.out_dir}/mano_params/{str(selected_vid_idx).zfill(3)}.json'
         os.makedirs(os.path.dirname(outhand_mano_params_path), exist_ok=True)
         with open(outhand_mano_params_path, "w") as f:
@@ -516,6 +554,11 @@ for selected_vid_idx in selected_vid_idxs:
             #             final_scale_left = scale_left
             #     nf += 1
                     
+            # Map absolute frame index → position in per-hand params
+            # (params_right/left have N_per_hand frames, not N_total)
+            frame_to_right_nf = {f: i for i, f in enumerate(chosen_frames_right)} if right_valid else {}
+            frame_to_left_nf = {f: i for i, f in enumerate(chosen_frames_left)} if left_valid else {}
+
             nf = 0
             if not use_parsed:
                 generator = reader(chosen_frames)
@@ -547,28 +590,34 @@ for selected_vid_idx in selected_vid_idxs:
                         c_idx += 1
                         images.append(image)
 
-                param_right = select_nf(params_right, nf)
-                param_left = select_nf(params_left, nf)
+                nf_right = frame_to_right_nf.get(chosen_f)
+                nf_left = frame_to_left_nf.get(chosen_f)
+                param_right = select_nf(params_right, nf_right) if right_valid and nf_right is not None else None
+                param_left = select_nf(params_left, nf_left) if left_valid and nf_left is not None else None
+                root_right = keypoints3d_right[abs_idx][0, :3] if param_right is not None else None
+                root_left = keypoints3d_left[abs_idx][0, :3] if param_left is not None else None
                 if abs_idx % args.stride == 0:
                     # visualize mano
                     if args.vis_smpl:
                         # mano parameters -> mesh
-                        vertices_right = body_model_right(return_verts=True, return_tensor=False, **param_right)
-                        vertices_left = body_model_left(return_verts=True, return_tensor=False, **param_left)
-                        # scaling
-                        # root_right = param_right['Th'].reshape(3)
-                        # root_left = param_left['Th'].reshape(3)
-                        root_right = keypoints3d_right[abs_idx][0, :3]
-                        root_left = keypoints3d_left[abs_idx][0, :3]
-                        vertices_right_scaled = (vertices_right[0] - root_right) * final_scale_right + root_right
-                        vertices_left_scaled = (vertices_left[0] - root_left) * final_scale_left + root_left
-                        # vertices_right_scaled = vertices_right[0]
-                        # vertices_left_scaled = vertices_left[0]
+                        if param_right is not None:
+                            vertices_right = body_model_right(return_verts=True, return_tensor=False, **param_right)
+                            vertices_right_scaled = (vertices_right[0] - root_right) * final_scale_right + root_right
+                        if param_left is not None:
+                            vertices_left = body_model_left(return_verts=True, return_tensor=False, **param_left)
+                            vertices_left_scaled = (vertices_left[0] - root_left) * final_scale_left + root_left
                         # project the mesh to image
-                        vertices = np.concatenate((vertices_left_scaled, vertices_right_scaled), axis=0)
-                        faces = np.concatenate((body_model_left.faces, body_model_right.faces+vertices_left_scaled.shape[0]), axis=0)
+                        if param_right is not None and param_left is not None:
+                            vertices = np.concatenate((vertices_left_scaled, vertices_right_scaled), axis=0)
+                            faces = np.concatenate((body_model_left.faces, body_model_right.faces+vertices_left_scaled.shape[0]), axis=0)
+                        elif param_right is not None:
+                            vertices = vertices_right_scaled
+                            faces = body_model_right.faces
+                        else:
+                            vertices = vertices_left_scaled
+                            faces = body_model_left.faces
                         image_vis, render_results = vis_smpl(
-                            args, vertices=vertices, faces=faces, images=images, 
+                            args, vertices=vertices, faces=faces, images=images,
                             nf=nf, cameras=cameras, add_back=True, out_dir="",
                             confident=confident, save_frames=False
                         )
@@ -579,8 +628,15 @@ for selected_vid_idx in selected_vid_idxs:
 
                     # save the mesh as obj
                     if args.save_mesh:
-                        vertices = np.concatenate((vertices_left_scaled, vertices_right_scaled), axis=0)
-                        faces = np.concatenate((body_model_left.faces, body_model_right.faces+vertices_left_scaled.shape[0]), axis=0)
+                        if param_right is not None and param_left is not None:
+                            vertices = np.concatenate((vertices_left_scaled, vertices_right_scaled), axis=0)
+                            faces = np.concatenate((body_model_left.faces, body_model_right.faces+vertices_left_scaled.shape[0]), axis=0)
+                        elif param_right is not None:
+                            vertices = vertices_right_scaled
+                            faces = body_model_right.faces
+                        else:
+                            vertices = vertices_left_scaled
+                            faces = body_model_left.faces
                         mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
                         outdir = os.path.join(args.out_dir, f'vis/meshes/{str(selected_vid_idx).zfill(3)}')
                         os.makedirs(outdir, exist_ok=True)
@@ -590,7 +646,12 @@ for selected_vid_idx in selected_vid_idxs:
                     # project the 3D keypoints to image
                     vis_config = CONFIG['handlr']
                     if args.vis_3d_repro:
-                        keypoints = np.concatenate((keypoints3d_right[abs_idx], keypoints3d_left[abs_idx]), axis=0)
+                        if nf_right is not None and nf_left is not None:
+                            keypoints = np.concatenate((keypoints3d_right[abs_idx], keypoints3d_left[abs_idx]), axis=0)
+                        elif nf_right is not None:
+                            keypoints = keypoints3d_right[abs_idx]
+                        else:
+                            keypoints = keypoints3d_left[abs_idx]
                         kpts_repro = projectN3(keypoints, projs)
                         kpts_repro[:, :, 2] = 0.5
                         image_vis = vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_3d_path, cameras=cameras, confident=confident)
@@ -600,11 +661,18 @@ for selected_vid_idx in selected_vid_idxs:
                         outhand_3d.write(image_vis)
 
                     # if args.vis_regressed_joints:
-                    joints_right = body_model_right(return_verts=False, return_tensor=False, **param_right)
-                    joints_left = body_model_left(return_verts=False, return_tensor=False, **param_left)
-                    joints_right = (joints_right[0] - root_right) * final_scale_right + root_right
-                    joints_left = (joints_left[0] - root_left) * final_scale_left + root_left
-                    joints = np.concatenate((joints_left, joints_right), axis=0)
+                    if param_right is not None:
+                        joints_right = body_model_right(return_verts=False, return_tensor=False, **param_right)
+                        joints_right = (joints_right[0] - root_right) * final_scale_right + root_right
+                    if param_left is not None:
+                        joints_left = body_model_left(return_verts=False, return_tensor=False, **param_left)
+                        joints_left = (joints_left[0] - root_left) * final_scale_left + root_left
+                    if param_right is not None and param_left is not None:
+                        joints = np.concatenate((joints_left, joints_right), axis=0)
+                    elif param_right is not None:
+                        joints = joints_right
+                    else:
+                        joints = joints_left
                     joints_repro = projectN3(joints, projs)
                     joints_repro[:, :, 2] = 0.5
                     image_vis = vis_repro(args, render_results, joints_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outjoint_3d_path, cameras=cameras, confident=confident)
@@ -614,7 +682,12 @@ for selected_vid_idx in selected_vid_idxs:
 
                     # overlay the 2D keypoints to image
                     if args.vis_2d_repro:
-                        keypoints2d = np.concatenate((all_keypoints2d_right[abs_idx], all_keypoints2d_left[abs_idx]), axis=1)
+                        if right_valid and left_valid:
+                            keypoints2d = np.concatenate((all_keypoints2d_right[abs_idx], all_keypoints2d_left[abs_idx]), axis=1)
+                        elif right_valid:
+                            keypoints2d = all_keypoints2d_right[abs_idx]
+                        else:
+                            keypoints2d = all_keypoints2d_left[abs_idx]
                         kpts_repro = keypoints2d
                         image_vis = vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_2d_path, cameras=cameras, confident=confident)
                         if abs_idx == 0:
