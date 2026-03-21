@@ -1,5 +1,6 @@
 import numpy as np
 import math
+from scipy.signal import savgol_filter
 
 
 def _reject_outliers_1d(signal, window=5, threshold=3.0):
@@ -106,6 +107,40 @@ def apply_one_euro_filter_2d(signal, mincutoff = 1.0, beta = 0.0, dcutoff = 1.0)
     poses_filter = OneEuroFilter(times[0], signal[0], np.zeros(N), min_cutoff = mincutoff, beta = beta, d_cutoff = dcutoff)
     filtered_signal = np.array([poses_filter(np.asarray([times[i]]), signal[i]) for i in range(T)])
     return filtered_signal.squeeze(1)
+
+def _clamp_savgol_params(T, window, polyorder):
+    if window % 2 == 0:
+        window += 1
+    window = min(window, T if T % 2 == 1 else T - 1)
+    polyorder = min(polyorder, window - 1)
+    return window, polyorder
+
+
+def apply_savgol_filter_2d(signal, window=11, polyorder=3):
+    """Zero-phase Savitzky-Golay smoothing for (T, N) signal."""
+    T, N = signal.shape
+    window, polyorder = _clamp_savgol_params(T, window, polyorder)
+    filtered = signal.copy()
+    for n in range(N):
+        filtered[:, n] = savgol_filter(signal[:, n], window_length=window, polyorder=polyorder)
+    return filtered
+
+
+def apply_savgol_filter_3d(data, window=11, polyorder=3):
+    """Zero-phase Savitzky-Golay smoothing for (T, J, N) data.
+
+    Unlike the causal One Euro filter, this is a symmetric filter so it
+    introduces no phase lag / drift.  ``window`` must be odd and greater than
+    ``polyorder``.
+    """
+    T, J, N = data.shape
+    window, polyorder = _clamp_savgol_params(T, window, polyorder)
+    filtered = data.copy()
+    for j in range(J):
+        for n in range(N):
+            filtered[:, j, n] = savgol_filter(data[:, j, n], window_length=window, polyorder=polyorder)
+    return filtered
+
 
 def apply_one_euro_filter_3d(data, mincutoff = 1.0, beta = 0.0, dcutoff = 1.0):
     T, J, N = data.shape

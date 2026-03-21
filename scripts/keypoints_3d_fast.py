@@ -12,7 +12,7 @@ from src.utils.parser import add_common_args
 from src.utils.cameras import removed_cameras, map_camera_names, get_projections
 from src.utils.fingers import FINGER_IDX, TIP_IDX
 from src.triangulate import triangulate_joints, ransac_processor
-from src.utils.filter import apply_one_euro_filter_3d, reject_outliers_median_3d
+from src.utils.filter import apply_one_euro_filter_3d, apply_savgol_filter_3d, reject_outliers_median_3d
 
 sys.path.append("./EasyMocap")
 from myeasymocap.operations.triangulate import SimpleTriangulate
@@ -30,7 +30,10 @@ parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove
 parser.add_argument("--ignore_missing_tip", action="store_true", help="Should a missing fingertip be allowed")
 parser.add_argument("--confidence_thresh", type=float, default=None, help="camera conficence")
 parser.add_argument("--optimize_bad_views", action="store_true", help="Whether to optimize extrinsics of bad views")
-parser.add_argument("--outlier_rejection", action="store_true", help="Reject outliers before one-euro smoothing (requires --to_smooth)")
+parser.add_argument("--outlier_rejection", action="store_true", help="Reject outliers before smoothing (requires --to_smooth)")
+parser.add_argument("--savgol", action="store_true", help="Use zero-phase Savitzky-Golay filter instead of One Euro filter (requires --to_smooth)")
+parser.add_argument("--savgol_window", type=int, default=11, help="Window length for Savitzky-Golay filter (must be odd)")
+parser.add_argument("--savgol_polyorder", type=int, default=3, help="Polynomial order for Savitzky-Golay filter")
 parser.add_argument("--outlier_window", type=int, default=5, help="Sliding window size for outlier rejection")
 parser.add_argument("--outlier_threshold", type=float, default=3.0, help="MAD multiplier threshold for outlier rejection")
 parser.add_argument("--min_run_length", type=int, default=1, help="Minimum consecutive frames a hand must appear to be kept; removes isolated false-positive detections")
@@ -177,17 +180,6 @@ for selected_vid_idx in selected_vid_idxs:
                     (keypoints2d_right[:, :, 2] == 1).all(axis=1)
                 )
             )
-            if args.to_smooth:
-                if np.sum(valid_left) > 1:
-                    data_left = keypoints2d_left[valid_left, :, :2].copy()
-                    if args.outlier_rejection:
-                        data_left = reject_outliers_median_3d(data_left, window=args.outlier_window, threshold=args.outlier_threshold)
-                    keypoints2d_left[valid_left, :, :2] = apply_one_euro_filter_3d(data_left, mincutoff=0.5, beta=0.0, dcutoff=1.0)
-                if np.sum(valid_right) > 1:
-                    data_right = keypoints2d_right[valid_right, :, :2].copy()
-                    if args.outlier_rejection:
-                        data_right = reject_outliers_median_3d(data_right, window=args.outlier_window, threshold=args.outlier_threshold)
-                    keypoints2d_right[valid_right, :, :2] = apply_one_euro_filter_3d(data_right, mincutoff=0.5, beta=0.0, dcutoff=1.0)
             all_keypoints2d_left.append(keypoints2d_left)
             all_keypoints2d_right.append(keypoints2d_right)
             if args.confidence_thresh is not None:
@@ -280,7 +272,39 @@ for selected_vid_idx in selected_vid_idxs:
             if np.any(to_use_left):
                 chosen_frames_left.append(l_idx)
             if np.any(to_use_right):
-                chosen_frames_right.append(l_idx)       
+                chosen_frames_right.append(l_idx)
+
+    all_keypoints3d_left = np.asarray(all_keypoints3d_left)   # (F, 21, 4)
+    all_keypoints3d_right = np.asarray(all_keypoints3d_right)  # (F, 21, 4)
+
+    if args.to_smooth:
+        valid_left = np.any(all_keypoints3d_left[:, :, :3] != 0, axis=(1, 2))
+        valid_right = np.any(all_keypoints3d_right[:, :, :3] != 0, axis=(1, 2))
+        if np.sum(valid_left) > 1:
+            data = all_keypoints3d_left[valid_left, :, :3].copy()
+            if args.outlier_rejection:
+                data = reject_outliers_median_3d(data, window=args.outlier_window, threshold=args.outlier_threshold)
+            if args.savgol:
+                data = apply_savgol_filter_3d(data, window=args.savgol_window, polyorder=args.savgol_polyorder)
+            else:
+                data = apply_one_euro_filter_3d(data, mincutoff=0.5, beta=0.0, dcutoff=1.0)
+            all_keypoints3d_left[valid_left, :, :3] = data
+        if np.sum(valid_right) > 1:
+            data = all_keypoints3d_right[valid_right, :, :3].copy()
+            if args.outlier_rejection:
+                data = reject_outliers_median_3d(data, window=args.outlier_window, threshold=args.outlier_threshold)
+            if args.savgol:
+                data = apply_savgol_filter_3d(data, window=args.savgol_window, polyorder=args.savgol_polyorder)
+            else:
+                data = apply_one_euro_filter_3d(data, mincutoff=0.5, beta=0.0, dcutoff=1.0)
+            all_keypoints3d_right[valid_right, :, :3] = data
+        print(f"Re-writing smoothed 3D keypoints to {keypt_file_left}")
+        with open(keypt_file_left, "w") as fl, open(keypt_file_right, "w") as fr:
+            for frame_kp_l, frame_kp_r in zip(all_keypoints3d_left, all_keypoints3d_right):
+                ujson.dump(frame_kp_l.tolist(), fl)
+                fl.write('\n')
+                ujson.dump(frame_kp_r.tolist(), fr)
+                fr.write('\n')
 
     all_kp2d_left = []  # (frames, view, 21, 3)
     all_kp2d_right = []
