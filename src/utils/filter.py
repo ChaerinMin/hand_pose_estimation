@@ -3,7 +3,8 @@ import math
 
 
 def _reject_outliers_1d(signal, window=5, threshold=3.0):
-    """Sliding-window MAD outlier detection and linear interpolation for 1D signal."""
+    """Sliding-window MAD outlier detection and linear interpolation for 1D signal.
+    Returns (cleaned, is_outlier)."""
     T = len(signal)
     half = window // 2
     is_outlier = np.zeros(T, dtype=bool)
@@ -22,7 +23,7 @@ def _reject_outliers_1d(signal, window=5, threshold=3.0):
             is_outlier[t] = True
 
     if not np.any(is_outlier):
-        return signal.copy()
+        return signal.copy(), is_outlier
 
     valid = np.where(~is_outlier)[0]
     cleaned = signal.copy()
@@ -30,15 +31,18 @@ def _reject_outliers_1d(signal, window=5, threshold=3.0):
         cleaned = np.interp(np.arange(T), valid, signal[valid])
     elif len(valid) == 1:
         cleaned[:] = signal[valid[0]]
-    return cleaned
+    return cleaned, is_outlier
 
 
 def reject_outliers_median_2d(signal, window=5, threshold=3.0):
     """Outlier rejection for (T, N) signal, applied independently per dimension."""
     T, N = signal.shape
     cleaned = np.empty_like(signal)
+    any_outlier = np.zeros(T, dtype=bool)
     for n in range(N):
-        cleaned[:, n] = _reject_outliers_1d(signal[:, n], window, threshold)
+        cleaned[:, n], is_outlier = _reject_outliers_1d(signal[:, n], window, threshold)
+        any_outlier |= is_outlier
+    print(f"  [outlier rejection 2d] {np.sum(any_outlier)}/{T} frames rejected")
     return cleaned
 
 
@@ -53,6 +57,7 @@ def reject_outliers_median_3d(data, window=5, threshold=3.0):
     half = window // 2
     cleaned = data.copy()
 
+    any_outlier = np.zeros(T, dtype=bool)
     for j in range(J):
         traj = data[:, j, :]  # (T, N)
         is_outlier = np.zeros(T, dtype=bool)
@@ -71,6 +76,7 @@ def reject_outliers_median_3d(data, window=5, threshold=3.0):
             if scale > 1e-8 and np.linalg.norm(traj[t] - med) > threshold * scale:
                 is_outlier[t] = True
 
+        any_outlier |= is_outlier
         if not np.any(is_outlier):
             continue
 
@@ -82,6 +88,7 @@ def reject_outliers_median_3d(data, window=5, threshold=3.0):
         elif len(valid) == 1:
             cleaned[:, j, :] = traj[valid[0]]
 
+    print(f"  [outlier rejection 3d] {np.sum(any_outlier)}/{T} frames rejected")
     return cleaned
 
 

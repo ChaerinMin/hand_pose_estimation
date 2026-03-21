@@ -177,16 +177,16 @@ for selected_vid_idx in selected_vid_idxs:
                 )
             )
             if args.to_smooth:
-                if keypoints2d_left[:2][valid_left[:2]].shape[0] > 1:
-                    data_left = keypoints2d_left[:2][valid_left[:2]]
+                if np.sum(valid_left) > 1:
+                    data_left = keypoints2d_left[valid_left, :, :2].copy()
                     if args.outlier_rejection:
                         data_left = reject_outliers_median_3d(data_left, window=args.outlier_window, threshold=args.outlier_threshold)
-                    keypoints2d_left[:2][valid_left[:2]] = apply_one_euro_filter_3d(data_left, mincutoff=0.5, beta=0.0, dcutoff=1.0)
-                if keypoints2d_right[:2][valid_right[:2]].shape[0] > 1:
-                    data_right = keypoints2d_right[:2][valid_right[:2]]
+                    keypoints2d_left[valid_left, :, :2] = apply_one_euro_filter_3d(data_left, mincutoff=0.5, beta=0.0, dcutoff=1.0)
+                if np.sum(valid_right) > 1:
+                    data_right = keypoints2d_right[valid_right, :, :2].copy()
                     if args.outlier_rejection:
                         data_right = reject_outliers_median_3d(data_right, window=args.outlier_window, threshold=args.outlier_threshold)
-                    keypoints2d_right[:2][valid_right[:2]] = apply_one_euro_filter_3d(data_right, mincutoff=0.5, beta=0.0, dcutoff=1.0)
+                    keypoints2d_right[valid_right, :, :2] = apply_one_euro_filter_3d(data_right, mincutoff=0.5, beta=0.0, dcutoff=1.0)
             all_keypoints2d_left.append(keypoints2d_left)
             all_keypoints2d_right.append(keypoints2d_right)
             if args.confidence_thresh is not None:

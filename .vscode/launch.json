@@ -108,7 +108,7 @@
                 // "--is_bootstrap",
                 "--outlier_rejection",
                 "--outlier_window", "5",
-                "--outlier_threshold", "3.0",
+                "--outlier_threshold", "1.0",
             ]
         },
         {
@@ -139,7 +139,7 @@
                 "--to_smooth",
                 "--outlier_rejection",
                 "--outlier_window", "5",
-                "--outlier_threshold", "3.0",
+                "--outlier_threshold", "1.0",
                 // "--save_mesh",
                 // "--refine_shape_with_mask",  // only when is_bootstrap=True
                 // "--subject_name", "chaerin_v2",
