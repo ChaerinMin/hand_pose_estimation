@@ -33,6 +33,7 @@ parser.add_argument("--optimize_bad_views", action="store_true", help="Whether t
 parser.add_argument("--outlier_rejection", action="store_true", help="Reject outliers before one-euro smoothing (requires --to_smooth)")
 parser.add_argument("--outlier_window", type=int, default=5, help="Sliding window size for outlier rejection")
 parser.add_argument("--outlier_threshold", type=float, default=3.0, help="MAD multiplier threshold for outlier rejection")
+parser.add_argument("--min_run_length", type=int, default=1, help="Minimum consecutive frames a hand must appear to be kept; removes isolated false-positive detections")
 args = parser.parse_args()
 args.out_dir = os.path.join(args.out_dir, "hand")
 
@@ -308,6 +309,30 @@ for selected_vid_idx in selected_vid_idxs:
     else:
         param_utils.optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=True)
               
+    # Remove isolated false-positive detections: keep only runs of >= min_run_length consecutive frames.
+    if args.min_run_length > 1:
+        def filter_short_runs(frames, min_run):
+            if not frames:
+                return frames
+            filtered = []
+            run_start = frames[0]
+            run = [frames[0]]
+            for f in frames[1:]:
+                if f == run[-1] + 1:
+                    run.append(f)
+                else:
+                    if len(run) >= min_run:
+                        filtered.extend(run)
+                    run = [f]
+            if len(run) >= min_run:
+                filtered.extend(run)
+            return filtered
+
+        before_l, before_r = len(chosen_frames_left), len(chosen_frames_right)
+        chosen_frames_left = filter_short_runs(chosen_frames_left, args.min_run_length)
+        chosen_frames_right = filter_short_runs(chosen_frames_right, args.min_run_length)
+        print(f"  [run-length filter] left: {before_l} -> {len(chosen_frames_left)} frames, right: {before_r} -> {len(chosen_frames_right)} frames")
+
     chosen_path_left = os.path.join(keypoints3d_dir, f"chosen_frames_left.json")
     chosen_path_right = os.path.join(keypoints3d_dir, f"chosen_frames_right.json")
     with open(chosen_path_left, "w") as f:

@@ -104,11 +104,12 @@
                 "--easymocap",
                 "--confidence_thresh", "100",
                 "--optimize_bad_views",
-                "--to_smooth",
+                // "--to_smooth",
                 // "--is_bootstrap",
                 "--outlier_rejection",
                 "--outlier_window", "5",
-                "--outlier_threshold", "1.0",
+                "--outlier_threshold", "0.5",
+                "--min_run_length", "3",
             ]
         },
         {
@@ -136,10 +137,10 @@
                 "--vis_3d_repro",
                 "--confidence_thresh", "100",
                 "--optimize_bad_views",
-                "--to_smooth",
+                // "--to_smooth",
                 "--outlier_rejection",
                 "--outlier_window", "5",
-                "--outlier_threshold", "1.0",
+                "--outlier_threshold", "0.5",
                 // "--save_mesh",
                 // "--refine_shape_with_mask",  // only when is_bootstrap=True
                 // "--subject_name", "chaerin_v2",
