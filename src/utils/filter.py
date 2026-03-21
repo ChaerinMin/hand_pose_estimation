@@ -1,6 +1,90 @@
 import numpy as np
 import math
 
+
+def _reject_outliers_1d(signal, window=5, threshold=3.0):
+    """Sliding-window MAD outlier detection and linear interpolation for 1D signal."""
+    T = len(signal)
+    half = window // 2
+    is_outlier = np.zeros(T, dtype=bool)
+
+    global_med = np.median(signal)
+    global_mad = np.median(np.abs(signal - global_med))
+
+    for t in range(T):
+        lo = max(0, t - half)
+        hi = min(T, t + half + 1)
+        w = signal[lo:hi]
+        med = np.median(w)
+        local_mad = np.median(np.abs(w - med))
+        scale = local_mad if local_mad > 1e-8 else global_mad
+        if scale > 1e-8 and np.abs(signal[t] - med) > threshold * scale:
+            is_outlier[t] = True
+
+    if not np.any(is_outlier):
+        return signal.copy()
+
+    valid = np.where(~is_outlier)[0]
+    cleaned = signal.copy()
+    if len(valid) >= 2:
+        cleaned = np.interp(np.arange(T), valid, signal[valid])
+    elif len(valid) == 1:
+        cleaned[:] = signal[valid[0]]
+    return cleaned
+
+
+def reject_outliers_median_2d(signal, window=5, threshold=3.0):
+    """Outlier rejection for (T, N) signal, applied independently per dimension."""
+    T, N = signal.shape
+    cleaned = np.empty_like(signal)
+    for n in range(N):
+        cleaned[:, n] = _reject_outliers_1d(signal[:, n], window, threshold)
+    return cleaned
+
+
+def reject_outliers_median_3d(data, window=5, threshold=3.0):
+    """Outlier rejection for (T, J, N) data.
+
+    Per joint: frames where the position deviates from the window median by more
+    than ``threshold`` * MAD (in Euclidean distance) are flagged as outliers and
+    replaced by linear interpolation of the nearest valid neighbours.
+    """
+    T, J, N = data.shape
+    half = window // 2
+    cleaned = data.copy()
+
+    for j in range(J):
+        traj = data[:, j, :]  # (T, N)
+        is_outlier = np.zeros(T, dtype=bool)
+
+        global_med = np.median(traj, axis=0)
+        global_mad = np.median(np.linalg.norm(traj - global_med, axis=1))
+
+        for t in range(T):
+            lo = max(0, t - half)
+            hi = min(T, t + half + 1)
+            w = traj[lo:hi]  # (w_size, N)
+            med = np.median(w, axis=0)  # (N,)
+            dists = np.linalg.norm(w - med, axis=1)  # (w_size,)
+            local_mad = np.median(dists)
+            scale = local_mad if local_mad > 1e-8 else global_mad
+            if scale > 1e-8 and np.linalg.norm(traj[t] - med) > threshold * scale:
+                is_outlier[t] = True
+
+        if not np.any(is_outlier):
+            continue
+
+        valid = np.where(~is_outlier)[0]
+        if len(valid) >= 2:
+            all_t = np.arange(T)
+            for n in range(N):
+                cleaned[:, j, n] = np.interp(all_t, valid, traj[valid, n])
+        elif len(valid) == 1:
+            cleaned[:, j, :] = traj[valid[0]]
+
+    return cleaned
+
+
 def smoothing_factor(t_e, cutoff):
     r = 2 * math.pi * cutoff * t_e
     return r / (r + 1)

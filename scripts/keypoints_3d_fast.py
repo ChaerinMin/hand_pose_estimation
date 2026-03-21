@@ -12,7 +12,7 @@ from src.utils.parser import add_common_args
 from src.utils.cameras import removed_cameras, map_camera_names, get_projections
 from src.utils.fingers import FINGER_IDX, TIP_IDX
 from src.triangulate import triangulate_joints, ransac_processor
-from src.utils.filter import apply_one_euro_filter_3d
+from src.utils.filter import apply_one_euro_filter_3d, reject_outliers_median_3d
 
 sys.path.append("./EasyMocap")
 from myeasymocap.operations.triangulate import SimpleTriangulate
@@ -30,6 +30,9 @@ parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove
 parser.add_argument("--ignore_missing_tip", action="store_true", help="Should a missing fingertip be allowed")
 parser.add_argument("--confidence_thresh", type=float, default=None, help="camera conficence")
 parser.add_argument("--optimize_bad_views", action="store_true", help="Whether to optimize extrinsics of bad views")
+parser.add_argument("--outlier_rejection", action="store_true", help="Reject outliers before one-euro smoothing (requires --to_smooth)")
+parser.add_argument("--outlier_window", type=int, default=5, help="Sliding window size for outlier rejection")
+parser.add_argument("--outlier_threshold", type=float, default=3.0, help="MAD multiplier threshold for outlier rejection")
 args = parser.parse_args()
 args.out_dir = os.path.join(args.out_dir, "hand")
 
@@ -175,9 +178,15 @@ for selected_vid_idx in selected_vid_idxs:
             )
             if args.to_smooth:
                 if keypoints2d_left[:2][valid_left[:2]].shape[0] > 1:
-                    keypoints2d_left[:2][valid_left[:2]] = apply_one_euro_filter_3d(keypoints2d_left[:2][valid_left[:2]], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+                    data_left = keypoints2d_left[:2][valid_left[:2]]
+                    if args.outlier_rejection:
+                        data_left = reject_outliers_median_3d(data_left, window=args.outlier_window, threshold=args.outlier_threshold)
+                    keypoints2d_left[:2][valid_left[:2]] = apply_one_euro_filter_3d(data_left, mincutoff=0.5, beta=0.0, dcutoff=1.0)
                 if keypoints2d_right[:2][valid_right[:2]].shape[0] > 1:
-                    keypoints2d_right[:2][valid_right[:2]] = apply_one_euro_filter_3d(keypoints2d_right[:2][valid_right[:2]], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+                    data_right = keypoints2d_right[:2][valid_right[:2]]
+                    if args.outlier_rejection:
+                        data_right = reject_outliers_median_3d(data_right, window=args.outlier_window, threshold=args.outlier_threshold)
+                    keypoints2d_right[:2][valid_right[:2]] = apply_one_euro_filter_3d(data_right, mincutoff=0.5, beta=0.0, dcutoff=1.0)
             all_keypoints2d_left.append(keypoints2d_left)
             all_keypoints2d_right.append(keypoints2d_right)
             if args.confidence_thresh is not None:

@@ -14,7 +14,7 @@ from src.utils.cameras import (get_projections, map_camera_names,
                                removed_cameras)
 from src.utils.easymocap_utils import (load_model, projectN3, vis_repro,
                                        vis_smpl)
-from src.utils.filter import apply_one_euro_filter_2d, apply_one_euro_filter_3d
+from src.utils.filter import apply_one_euro_filter_2d, apply_one_euro_filter_3d, reject_outliers_median_2d, reject_outliers_median_3d
 from src.utils.parser import add_common_args
 from src.utils.reader_v2 import Reader
 from src.utils.video_handler import convert_video_ffmpeg, create_video_writer
@@ -85,6 +85,9 @@ parser.add_argument(
 )
 parser.add_argument('--model', type=str, default='smpl', choices=['smpl', 'smplh', 'smplx', 'manol', 'manor'])
 parser.add_argument("--optimize_bad_views", action="store_true", help="Whether to optimize extrinsics of bad views")
+parser.add_argument("--outlier_rejection", action="store_true", help="Reject outliers before one-euro smoothing (requires --to_smooth)")
+parser.add_argument("--outlier_window", type=int, default=5, help="Sliding window size for outlier rejection")
+parser.add_argument("--outlier_threshold", type=float, default=3.0, help="MAD multiplier threshold for outlier rejection")
 parser.add_argument('--gender', type=str, default='neutral', choices=['neutral', 'male', 'female'])
 parser.add_argument("--refine_shape_with_mask", action="store_true", help="Refine MANO shape parameters using hand masks")
 parser.add_argument(
@@ -374,8 +377,10 @@ for selected_vid_idx in selected_vid_idxs:
         # smooth keypoints
         if args.to_smooth:
             print('Smoothing Keypoints 3D...')
-            keypoints3d_left[:3] = apply_one_euro_filter_3d(keypoints3d_left[:3], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
-            keypoints3d_right[:3] = apply_one_euro_filter_3d(keypoints3d_right[:3], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+            kp3d_left = reject_outliers_median_3d(keypoints3d_left[:, :, :3], window=args.outlier_window, threshold=args.outlier_threshold) if args.outlier_rejection else keypoints3d_left[:, :, :3]
+            keypoints3d_left[:, :, :3] = apply_one_euro_filter_3d(kp3d_left, mincutoff=0.5, beta=0.0, dcutoff=1.0)
+            kp3d_right = reject_outliers_median_3d(keypoints3d_right[:, :, :3], window=args.outlier_window, threshold=args.outlier_threshold) if args.outlier_rejection else keypoints3d_right[:, :, :3]
+            keypoints3d_right[:, :, :3] = apply_one_euro_filter_3d(kp3d_right, mincutoff=0.5, beta=0.0, dcutoff=1.0)
 
         # keypoints -> mano parameters
         weight_pose = {
@@ -487,13 +492,13 @@ for selected_vid_idx in selected_vid_idxs:
         if args.to_smooth:
             print('Smoothing Manos...')
             if right_valid:
-                params_right['Rh'] = apply_one_euro_filter_2d(params_right['Rh'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
-                params_right['Th'] = apply_one_euro_filter_2d(params_right['Th'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
-                params_right['poses'] = apply_one_euro_filter_2d(params_right['poses'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+                for key in ('Rh', 'Th', 'poses'):
+                    data = reject_outliers_median_2d(params_right[key], window=args.outlier_window, threshold=args.outlier_threshold) if args.outlier_rejection else params_right[key]
+                    params_right[key] = apply_one_euro_filter_2d(data, mincutoff=0.5, beta=0.0, dcutoff=1.0)
             if left_valid:
-                params_left['Rh'] = apply_one_euro_filter_2d(params_left['Rh'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
-                params_left['Th'] = apply_one_euro_filter_2d(params_left['Th'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
-                params_left['poses'] = apply_one_euro_filter_2d(params_left['poses'], mincutoff = 0.5, beta = 0.0, dcutoff = 1.0)
+                for key in ('Rh', 'Th', 'poses'):
+                    data = reject_outliers_median_2d(params_left[key], window=args.outlier_window, threshold=args.outlier_threshold) if args.outlier_rejection else params_left[key]
+                    params_left[key] = apply_one_euro_filter_2d(data, mincutoff=0.5, beta=0.0, dcutoff=1.0)
 
         # json dump mano
         manos_params = {}
