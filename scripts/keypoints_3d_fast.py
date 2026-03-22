@@ -30,7 +30,7 @@ parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove
 parser.add_argument("--ignore_missing_tip", action="store_true", help="Should a missing fingertip be allowed")
 parser.add_argument("--confidence_thresh", type=float, default=None, help="camera conficence")
 parser.add_argument("--optimize_bad_views", action="store_true", help="Whether to optimize extrinsics of bad views")
-parser.add_argument("--outlier_rejection", action=argparse.BooleanOptionalAction, default=True, help="Reject outliers before smoothing (requires --to_smooth)")
+parser.add_argument("--outlier_rejection", action="store_true", default=False, help="Reject outliers before smoothing (requires --to_smooth)")
 parser.add_argument("--savgol", action=argparse.BooleanOptionalAction, default=True, help="Use zero-phase Savitzky-Golay filter instead of One Euro filter (requires --to_smooth)")
 parser.add_argument("--savgol_window", type=int, default=11, help="Window length for Savitzky-Golay filter (must be odd)")
 parser.add_argument("--savgol_polyorder", type=int, default=3, help="Polynomial order for Savitzky-Golay filter")

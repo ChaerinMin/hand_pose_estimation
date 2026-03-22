@@ -85,7 +85,7 @@ parser.add_argument(
 )
 parser.add_argument('--model', type=str, default='smpl', choices=['smpl', 'smplh', 'smplx', 'manol', 'manor'])
 parser.add_argument("--optimize_bad_views", action="store_true", help="Whether to optimize extrinsics of bad views")
-parser.add_argument("--outlier_rejection", action=argparse.BooleanOptionalAction, default=True, help="Reject outliers before smoothing (requires --to_smooth)")
+parser.add_argument("--outlier_rejection", action="store_true", default=False, help="Reject outliers before smoothing (requires --to_smooth)")
 parser.add_argument("--outlier_window", type=int, default=5, help="Sliding window size for outlier rejection")
 parser.add_argument("--outlier_threshold", type=float, default=0.5, help="MAD multiplier threshold for outlier rejection")
 parser.add_argument("--savgol", action=argparse.BooleanOptionalAction, default=True, help="Use zero-phase Savitzky-Golay filter instead of One Euro filter (requires --to_smooth)")
