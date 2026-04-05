@@ -199,14 +199,11 @@ class Renderer(object):
                 img_alpha[hand_region] = 0.5
                 rend_cat = (rend_rgba[..., :3].astype(np.float32) * hand_alpha + img.astype(np.float32) * img_alpha).clip(0.0, 255.0).astype(np.uint8)
                 rend_cat = rend_cat.copy()
-                if confident is not None:
-                    if confident[cname]:
-                        text_color = (0, 0, 255)
-                    else:
-                        text_color = (0, 0, 0)
-                else:
-                    text_color = (255, 255, 255)
-                cv2.putText(rend_cat, cname, (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 2, text_color, 2)
+                cv2.putText(rend_cat, cname, (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 0), 2)
+                if confident is not None and confident[cname]:
+                    h, w = rend_cat.shape[:2]
+                    thickness = max(4, min(h, w) // 60)
+                    cv2.rectangle(rend_cat, (0, 0), (w - 1, h - 1), (0, 0, 255), thickness)
             else:
                 rend_cat = rend_rgba
             

@@ -101,14 +101,11 @@ def vis_repro(args, images, kpts_repro, nf, config, to_img=True, mode='repro', o
             plot_keypoints(img, keypoints, pid=pid, config=config, use_limb_color=True, lw=4)
         if cameras is not None:
             cname = cameras["names"][nv]
-            if confident is not None:
-                if confident[cname]:
-                    text_color = (0, 0, 255)
-                else:
-                    text_color = (0, 0, 0)
-            else:
-                text_color = (255, 255, 255)
-            cv2.putText(img, cname.replace(".jpg", ""), (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 2, text_color, 2)
+            cv2.putText(img, cname.replace(".jpg", ""), (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 0), 2)
+            if confident is not None and confident[cname]:
+                h, w = img.shape[:2]
+                thickness = max(4, min(h, w) // 60)
+                cv2.rectangle(img, (0, 0), (w - 1, h - 1), (0, 0, 255), thickness)
         images_vis.append(img)
     if len(images_vis) > 1:
         images_vis = merge(images_vis, resize=not args.save_origin)

@@ -14,12 +14,20 @@ def parse_timestamp(filename):
     timestamp_str = filename.split('_')[-1].split('.')[0]
     return datetime.datetime.fromtimestamp(int(timestamp_str) / 1e6)
 
+VIDEO_EXTS = ('.mp4', '.avi')
+
+def glob_videos(base_path):
+    files = []
+    for ext in VIDEO_EXTS:
+        files += glob(f"{base_path}/*{ext}")
+    return natsorted(files)
+
 def find_closest_video(folder, anchor_timestamp):
     min_diff = datetime.timedelta(seconds=1)  # Max allowed difference
     closest_video = None
 
     for filename in os.listdir(folder):
-        if filename.endswith('.mp4'):
+        if filename.endswith(VIDEO_EXTS):
             video_timestamp = parse_timestamp(filename)
             time_diff = abs(video_timestamp - anchor_timestamp)
             
@@ -49,14 +57,15 @@ class Reader():
             self.streams = {}
             self.vids = []
             if anchor_camera:
-                mp4_list = natsorted(glob(f"{path}/{anchor_camera}/*.mp4"))
-                if len(mp4_list) > self.ith:
-                    self.vids.append(natsorted(glob(f"{path}/{anchor_camera}/*.mp4"))[self.ith])
+                vid_list = glob_videos(f"{path}/{anchor_camera}")
+                if len(vid_list) > self.ith:
+                    self.vids.append(vid_list[self.ith])
             else:
                 for cam in cam_names: #os.listdir(path):
-                    if 'imu' not in cam and 'mic' not in cam and len(glob(f"{path}/{cam}/*.mp4")) > self.ith:
-                        if cam not in cams_to_remove:
-                            self.vids.append(natsorted(glob(f"{path}/{cam}/*.mp4"))[self.ith])
+                    if 'imu' not in cam and 'mic' not in cam and cam not in cams_to_remove:
+                        vid_list = glob_videos(f"{path}/{cam}")
+                        if len(vid_list) > self.ith:
+                            self.vids.append(vid_list[self.ith])
                     if len(self.vids) > 0:
                         break
             self.anchor_timestamp = parse_timestamp(self.vids[0])

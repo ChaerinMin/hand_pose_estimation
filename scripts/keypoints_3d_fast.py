@@ -332,10 +332,12 @@ for selected_vid_idx in selected_vid_idxs:
     all_kp3d_right = all_kp3d_right.reshape(-1, 4)
     all_kp2d = np.concatenate([all_kp2d_left, all_kp2d_right], axis=1)  # (view, points, 3)
     all_kp3d = np.concatenate([all_kp3d_left, all_kp3d_right], axis=0)  # (points, 4)
-    if args.optimize_bad_views:  
+    if args.optimize_bad_views:
         new_rot, new_tr = param_utils.optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False)
         new_params_path = os.path.join(calib_dir, "new_params.txt")
-        param_utils.update_extrinsics(new_params_path, params, new_rot, new_tr)
+        cam_name_mask = np.isin(params['cam_name'], cameras['names'])
+        filtered_params = params[cam_name_mask]
+        param_utils.update_extrinsics(new_params_path, filtered_params, new_rot, new_tr)
     else:
         param_utils.optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=True)
               
