@@ -72,6 +72,8 @@ def read_params(params_path, distortion, args):
         cam_name_dtype = "<U22"
     elif args.setting == "brics-studio":
         cam_name_dtype = "<U18"
+    elif args.setting == "brics-mobile":
+        cam_name_dtype = "<U36"
     else:
         cam_name_dtype = None
         raise NotImplementedError
@@ -205,6 +207,11 @@ def optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False):
             np.logical_and(init_projected[..., 0] < 1280, init_projected[..., 0] >= 0),
             np.logical_and(init_projected[..., 1] < 720, init_projected[..., 1] >= 0)
         ).squeeze()
+        if proj_valid.sum() < 4:
+            new_rot.append(R_init)
+            new_tr.append(T_init)
+            print(f"Too few valid projected keypoints for {cname} ({proj_valid.sum()})")
+            continue
         init_error = np.linalg.norm(kp2d[valid][proj_valid] - init_projected[proj_valid].squeeze(), axis=-1)
         init_errors.append(init_error)
         init_err_mean = np.mean(init_error)

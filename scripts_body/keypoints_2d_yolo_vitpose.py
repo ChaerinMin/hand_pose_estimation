@@ -461,6 +461,8 @@ def create_collage_video(args, params, cam_names, cam_mapper,
         cam_name_slicer = slice(0, 21)
     elif args.setting == "brics-studio":
         cam_name_slicer = slice(0,18)
+    elif args.setting == "brics-mobile":
+        cam_name_slicer = slice(0,36)
     else:
         raise NotImplementedError()
     assert args.stage == 2, "Only implemented for use_parsed"
@@ -528,7 +530,7 @@ def main():
     # parser.add_argument('--vis', action='store_true', default=True, help='Create collage visualization video from all cameras')
     parser.add_argument('--vis_only', action='store_true', help='Only create visualization (skip keypoint extraction)')
     args = parser.parse_args()
-    args.out_dir = os.path.join(args.out_dir, "hand")
+    args.out_dir = os.path.join(args.out_dir, "body")
 
     device = torch.device('cuda')
     input_path = os.path.join(args.root_dir, args.seq_path)
@@ -601,7 +603,8 @@ def main():
         reader = Reader(
             args.input_type, video_dir, cam_names=cam_names,
             cams_to_remove=cams_to_remove, ith=selected_vid_idx,
-            anchor_camera=anchor_camera_by_length if args.ith == -1 else args.anchor_camera
+            anchor_camera=anchor_camera_by_length if args.ith == -1 else args.anchor_camera,
+            match_by_timestamp=(args.setting != "brics-mobile")
         )
         if reader.frame_count <= 0:
             continue

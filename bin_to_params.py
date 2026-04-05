@@ -45,8 +45,9 @@ def main(args):
             image_params.append(tuple(param))
             skip_next = True
 
+    cam_name_dtype = '<U36' if args.setting == 'brics-mobile' else '<U21'
     images = np.array(image_params, dtype=[
-        ('cam_id', int), ('cam_name', '<U21'),
+        ('cam_id', int), ('cam_name', cam_name_dtype),
         ('qvecw', float), ('qvecx', float), ('qvecy', float), ('qvecz', float),
         ('tvecx', float), ('tvecy', float), ('tvecz', float)
     ])
@@ -102,6 +103,13 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--day", type=str, required=True, help="yyyy-mm-dd")
     parser.add_argument(
         "-m", "--multisequence", type=str, required=True, help="multisequence0000001"
+    )
+    parser.add_argument(
+        "--setting",
+        type=str,
+        choices=["brics-mini", "brics-studio", "brics-mobile"],
+        default="brics-mini",
+        help="Camera setting (brics-mini, brics-studio, brics-mobile)"
     )
     parser.add_argument(
         "--stage",

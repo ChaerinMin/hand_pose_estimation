@@ -85,7 +85,7 @@ def main():
     # paths
     base_path = args.root_dir
     image_base = os.path.join(base_path, args.seq_path)
-    output_path = os.path.join(args.out_dir, "hand")
+    output_path = os.path.join(args.out_dir, "body")
 
     # load cameras
     params_txt = "optim_params.txt" if args.use_optim_params else "params.txt"
@@ -147,7 +147,7 @@ def main():
         print(f'Video ID {selected_vid_idx}...')
 
         keypoints2d_dir = os.path.join(
-            output_path, "keypoints_2d", str(selected_vid_idx).zfill(3)
+            output_path, "intermediate", "keypoints_2d", str(selected_vid_idx).zfill(3)
         )
         cam_mapper = map_camera_names(keypoints2d_dir, cam_names)
 

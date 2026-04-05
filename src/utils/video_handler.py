@@ -10,6 +10,8 @@ def frame_preprocess(path, use_parsed, args, intr=None, dist_intr=None, dist=Non
         cam_name_slicer = slice(0, 21)
     elif args.setting == "brics-studio":
         cam_name_slicer = slice(0,18)
+    elif args.setting == "brics-mobile":
+        cam_name_slicer = slice(0,36)
     else:
         raise NotImplementedError()
     if use_parsed:
@@ -72,6 +74,8 @@ def load_first_frame(path, use_parsed, args, intr=None, dist_intr=None, dist=Non
         cam_name_slicer = slice(0, 21)
     elif args.setting == "brics-studio":
         cam_name_slicer = slice(0,18)
+    elif args.setting == "brics-mobile":
+        cam_name_slicer = slice(0,36)
     else:
         raise NotImplementedError()
     if use_parsed:

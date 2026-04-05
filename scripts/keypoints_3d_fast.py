@@ -230,18 +230,24 @@ for selected_vid_idx in selected_vid_idxs:
                     print(f"Error: {residuals.mean()}")
                 else:
                     triangulation = SimpleTriangulate("ransac")
-                    valid_cameras = {}
-                    for k_cam in cameras:
-                        if k_cam == "names":
-                            continue
-                        valid_cameras[k_cam] = cameras[k_cam][valid_left]
-                    keypoints3d_left = triangulation(np.asarray(keypoints2d_left)[valid_left], valid_cameras)['keypoints3d']
-                    valid_cameras = {}
-                    for k_cam in cameras:
-                        if k_cam == "names":
-                            continue
-                        valid_cameras[k_cam] = cameras[k_cam][valid_right]
-                    keypoints3d_right = triangulation(np.asarray(keypoints2d_right)[valid_right], valid_cameras)['keypoints3d']
+                    if valid_left.sum() == 0:
+                        keypoints3d_left = np.zeros((21, 4))
+                    else:
+                        valid_cameras = {}
+                        for k_cam in cameras:
+                            if k_cam == "names":
+                                continue
+                            valid_cameras[k_cam] = cameras[k_cam][valid_left]
+                        keypoints3d_left = triangulation(np.asarray(keypoints2d_left)[valid_left], valid_cameras)['keypoints3d']
+                    if valid_right.sum() == 0:
+                        keypoints3d_right = np.zeros((21, 4))
+                    else:
+                        valid_cameras = {}
+                        for k_cam in cameras:
+                            if k_cam == "names":
+                                continue
+                            valid_cameras[k_cam] = cameras[k_cam][valid_right]
+                        keypoints3d_right = triangulation(np.asarray(keypoints2d_right)[valid_right], valid_cameras)['keypoints3d']
                 ujson.dump(keypoints3d_left.tolist(), fl)
                 fl.write('\n')
                 ujson.dump(keypoints3d_right.tolist(), fr)

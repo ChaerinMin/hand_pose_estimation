@@ -19,6 +19,7 @@ debug*.png
 debug*.ply
 brics-mini
 brics-studio
+brics-mobile
 data/smplx/smplx/SMPLX_NEUTRAL.npz
 data/smplx/smplx/SMPLX_NEUTRAL.pkl
 data/smplx/smplx/SMPLX_MALE.npz
