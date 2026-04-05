@@ -332,7 +332,7 @@ else:
     params_txt = "params.txt"
 base_path = os.path.join(args.root_dir)
 image_dir = os.path.join(base_path, args.seq_path)
-output_path = os.path.join(args.out_dir, "hand")
+output_path = os.path.join(args.out_dir, "body")
 calib_dir = os.path.join(
     args.root_dir, args.seq_path, args.multisequence,
     "calib", f"stage{args.stage}", "sparse", "0"
@@ -464,17 +464,16 @@ for selected_vid_idx in selected_vid_idxs:
     else:
         video_dir = image_dir
 
-    # Read video
+    # Read video (used only to determine which cameras are valid)
     reader = Reader(
         "video",
         video_dir,
         cam_names=cam_names,
         cams_to_remove=cams_to_remove,
         ith=selected_vid_idx,
-        anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera
+        anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera,
+        match_by_timestamp=(args.setting != "brics-mobile")
     )
-    if reader.frame_count <= 0:
-        continue
 
     # Keypoint paths
     keypoints2d_dir = os.path.join(output_path, "intermediate", "keypoints_2d", str(selected_vid_idx).zfill(3))
@@ -484,6 +483,14 @@ for selected_vid_idx in selected_vid_idxs:
     if not os.path.exists(keypt3d_file):
         print(f"Warning: 3D keypoints not found at {keypt3d_file}, skipping...")
         continue
+
+    # Match camera names
+    cam_mapper = map_camera_names(keypoints2d_dir, cam_names)
+    extra_cams_to_remove = reader.to_delete
+    cur_cam_names = cam_names.copy()
+    for cam in extra_cams_to_remove:
+        if cam in cur_cam_names:
+            cur_cam_names.remove(cam)
 
     # Filter frames
     if args.use_filtered:
@@ -497,15 +504,7 @@ for selected_vid_idx in selected_vid_idxs:
         chosen_frames = list(range(args.start, args.end, args.stride))
 
     chosen_frames = sorted(chosen_frames)
-    print(f"Total valid frames {len(chosen_frames)}/{reader.frame_count}")
-
-    # Match camera names
-    cam_mapper = map_camera_names(keypoints2d_dir, cam_names)
-    extra_cams_to_remove = reader.to_delete
-    cur_cam_names = cam_names.copy()
-    for cam in extra_cams_to_remove:
-        if cam in cur_cam_names:
-            cur_cam_names.remove(cam)
+    print(f"Total valid frames {len(chosen_frames)}")
 
     # Load camera parameters
     intrs, projs, dist_intrs, dists, cameras = get_projections(

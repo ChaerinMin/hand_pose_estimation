@@ -187,7 +187,7 @@ def main():
 
     base_path = os.path.join(args.root_dir)
     image_base = os.path.join(base_path, args.seq_path)
-    output_path = os.path.join(args.out_dir, "hand")
+    output_path = os.path.join(args.out_dir, "body")
 
     # Load camera parameters
     if args.use_optim_params:
@@ -268,14 +268,13 @@ def main():
             video_dir = image_base
         cam_mapper = map_camera_names(keypoints2d_dir, cam_names)
 
-        # Get reader
+        # Get reader (used only to determine which cameras are valid)
         reader = Reader(
             args.input_type, video_dir, cam_names=cam_names,
             cams_to_remove=cams_to_remove, ith=selected_vid_idx,
-            anchor_camera=anchor_camera_by_length if args.ith == -1 else args.anchor_camera
+            anchor_camera=anchor_camera_by_length if args.ith == -1 else args.anchor_camera,
+            match_by_timestamp=(args.setting != "brics-mobile")
         )
-        if reader.frame_count <= 0:
-            continue
 
         extra_cams_to_remove = reader.to_delete
         cur_cam_names = cam_names.copy()
@@ -283,14 +282,27 @@ def main():
             if cam in cur_cam_names:
                 cur_cam_names.remove(cam)
 
+        # Derive frame count from JSONL files (not video clips)
+        jsonl_frame_count = 0
+        for cam in cur_cam_names:
+            if cam in cam_mapper:
+                kp_path = os.path.join(keypoints2d_dir, f"{cam_mapper[cam]}.jsonl")
+                if os.path.exists(kp_path):
+                    with open(kp_path, "r") as _f:
+                        jsonl_frame_count = sum(1 for _ in _f)
+                    break
+        if jsonl_frame_count <= 0:
+            print("No JSONL frames found")
+            continue
+
         print("Total Views:", len(cur_cam_names))
-        print("Total frames:", reader.frame_count)
+        print("Total frames:", jsonl_frame_count)
 
         intrs, projs, dist_intrs, dists, cameras = get_projections(
             args, params, cur_cam_names, cam_mapper, easymocap_format=True
         )
 
-        keypoints3d_dir = os.path.join(output_path, "keypoints_3d", str(selected_vid_idx).zfill(3))
+        keypoints3d_dir = os.path.join(output_path, "intermediate", "keypoints_3d", str(selected_vid_idx).zfill(3))
         try:
             shutil.rmtree(keypoints3d_dir)
         except FileNotFoundError:
@@ -298,7 +310,7 @@ def main():
         os.makedirs(keypoints3d_dir)
 
         if args.all_frames:
-            chosen_frames = range(0, reader.frame_count, 1)
+            chosen_frames = range(0, jsonl_frame_count, 1)
         else:
             chosen_frames = range(args.start, args.end, args.stride)
 
@@ -360,7 +372,7 @@ def main():
 
         chosen_frames_record = []
         with open(keypt_file, "w") as f3d:
-            for l_idx in tqdm(range(reader.frame_count), total=all_keypoints2d.shape[1]):
+            for l_idx in tqdm(range(jsonl_frame_count), total=all_keypoints2d.shape[1]):
                 if l_idx >= all_keypoints2d.shape[1]:
                     break
                 if args.end > 0 and l_idx > args.end:
@@ -450,7 +462,7 @@ def main():
         # Visualization
         # if args.vis_repro:
         print("Creating reprojection visualization...")
-        vis_dir = os.path.join(output_path, "vis_repro_3d", str(selected_vid_idx).zfill(3))
+        vis_dir = os.path.join(output_path, "vis", "repro_3d", str(selected_vid_idx).zfill(3))
         os.makedirs(vis_dir, exist_ok=True)
         vis_path = os.path.join(vis_dir, "repro.mp4")
 
@@ -463,16 +475,7 @@ def main():
         grid_cols = int(np.ceil(np.sqrt(len(cur_cam_names) * 1.5)))
 
         # Get image dimensions from first frame
-        if use_parsed:
-            # first_frame = chosen_frames[0]
-            sample_fidx = all_keypoints2d.shape[1] // 2
-            timestamp_dir = os.path.join(parsed_dir, f"timestamp_{sample_fidx}", "images")
-            sample_cam = cur_cam_names[0]
-            sample_path = os.path.join(timestamp_dir, f"{sample_cam}.jpg")
-            sample_img = cv2.imread(sample_path)
-            im_h, im_w = sample_img.shape[:2]
-        else:
-            im_h, im_w = params["height"][0], params["width"][0]
+        im_h, im_w = int(params["height"][0]), int(params["width"][0])
 
         # Scale for collage
         grid_rows = int(np.ceil(len(cur_cam_names) / grid_cols))
