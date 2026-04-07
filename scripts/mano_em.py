@@ -21,6 +21,7 @@ from src.utils.video_handler import convert_video_ffmpeg, create_video_writer
 from easymocap.dataset import CONFIG
 from easymocap.mytools import Timer
 from easymocap.pipeline import smpl_from_keypoints3d, smpl_from_keypoints3d2d
+from easymocap.pyfitting import optimizeShape
 from easymocap.smplmodel import select_nf
 from easymocap.smplmodel.body_model import SMPLlayer
 
@@ -427,6 +428,46 @@ for selected_vid_idx in selected_vid_idxs:
             else:
                 print(f"Warning: Shape file not found at {shape_save_path}")
 
+        CHUNK_SIZE = 300
+        SHAPE_SAMPLE = 100 
+
+        def smpl_from_keypoints3d_chunked(body_model, kp3ds, weight_shape, weight_pose, init_shapes):
+            nFrames = kp3ds.shape[0]
+            if nFrames <= CHUNK_SIZE:
+                return smpl_from_keypoints3d(body_model, kp3ds,
+                    config=dataset_config, args=args,
+                    weight_shape=weight_shape, weight_pose=weight_pose,
+                    init_shapes=init_shapes)
+            print(f"  [chunked] {nFrames} frames > {CHUNK_SIZE}, splitting into chunks")
+            if init_shapes is None:
+                sample_idx = np.linspace(0, nFrames - 1, min(SHAPE_SAMPLE, nFrames), dtype=int)
+                kp3ds_sample = kp3ds[sample_idx]
+                params_init = body_model.init_params(nFrames=1)
+                params_shape = optimizeShape(body_model, params_init, kp3ds_sample,
+                    weight_loss=weight_shape, kintree=dataset_config['kintree'])
+                shapes = params_shape['shapes']
+                print(f"  [chunked] shape estimated from {len(sample_idx)} frames")
+            else:
+                shapes = init_shapes
+            rh_list, th_list, poses_list = [], [], []
+            for chunk_start in range(0, nFrames, CHUNK_SIZE):
+                chunk_end = min(chunk_start + CHUNK_SIZE, nFrames)
+                chunk_kp3d = kp3ds[chunk_start:chunk_end]
+                print(f"  [chunked] frames {chunk_start}-{chunk_end-1}")
+                chunk_params = smpl_from_keypoints3d(body_model, chunk_kp3d,
+                    config=dataset_config, args=args,
+                    weight_shape=weight_shape, weight_pose=weight_pose,
+                    init_shapes=shapes)
+                rh_list.append(chunk_params['Rh'])
+                th_list.append(chunk_params['Th'])
+                poses_list.append(chunk_params['poses'])
+            return {
+                'Rh': np.concatenate(rh_list, axis=0),
+                'Th': np.concatenate(th_list, axis=0),
+                'poses': np.concatenate(poses_list, axis=0),
+                'shapes': shapes,
+            }
+
         fit_3d2d = False
         params_right = None
         params_left = None
@@ -443,12 +484,14 @@ for selected_vid_idx in selected_vid_idxs:
                 )
         else:
             if right_valid:
-                params_right = smpl_from_keypoints3d(body_model_right, keypoints3d_right_mano_scaled,
-                    config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 1e2}, weight_pose=weight_pose,
-                    init_shapes=init_shapes_right) # 5e3
+                params_right = smpl_from_keypoints3d_chunked(
+                    body_model_right, keypoints3d_right_mano_scaled,
+                    weight_shape={'s3d': 1e5, 'reg_shapes': 1e2}, weight_pose=weight_pose,
+                    init_shapes=init_shapes_right)
             if left_valid:
-                params_left = smpl_from_keypoints3d(body_model_left, keypoints3d_left_mano_scaled,
-                    config=dataset_config, args=args, weight_shape={'s3d': 1e5, 'reg_shapes': 1e2}, weight_pose=weight_pose,
+                params_left = smpl_from_keypoints3d_chunked(
+                    body_model_left, keypoints3d_left_mano_scaled,
+                    weight_shape={'s3d': 1e5, 'reg_shapes': 1e2}, weight_pose=weight_pose,
                     init_shapes=init_shapes_left)
 
         # hand masks --> shape (beta)
