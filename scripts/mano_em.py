@@ -21,7 +21,8 @@ from src.utils.video_handler import convert_video_ffmpeg, create_video_writer
 from easymocap.dataset import CONFIG
 from easymocap.mytools import Timer
 from easymocap.pipeline import smpl_from_keypoints3d, smpl_from_keypoints3d2d
-from easymocap.pyfitting import optimizeShape
+from easymocap.pyfitting import optimizeShape, optimizePose3D
+from easymocap.pipeline.config import Config
 from easymocap.smplmodel import select_nf
 from easymocap.smplmodel.body_model import SMPLlayer
 
@@ -429,7 +430,31 @@ for selected_vid_idx in selected_vid_idxs:
                 print(f"Warning: Shape file not found at {shape_save_path}")
 
         CHUNK_SIZE = 300
-        SHAPE_SAMPLE = 100 
+        SHAPE_SAMPLE = 100
+
+        def optimize_chunk(body_model, chunk_kp3d, shapes, weight_pose):
+            """Fixed shape, global RT without smooth losses, then full pose with original weights."""
+            nFrames = chunk_kp3d.shape[0]
+            params = body_model.init_params(nFrames=nFrames)
+            params['shapes'] = shapes.copy()
+            cfg = Config(args)
+            cfg.device = body_model.device
+            cfg.model_type = body_model.model_type
+            # Stage 1: global RT only, no smoothness (avoids local minimum near Rh=0)
+            weight_global = {k: v for k, v in weight_pose.items()}
+            weight_global['smooth_body'] = 0.0
+            weight_global['smooth_poses'] = 0.0
+            cfg.OPT_R = True
+            cfg.OPT_T = True
+            cfg.GLOBAL_ONLY = True
+            with Timer('Optimize global RT'):
+                params = optimizePose3D(body_model, params, chunk_kp3d, weight=weight_global, cfg=cfg)
+            cfg.GLOBAL_ONLY = False
+            # Stage 2: full pose with original weights
+            cfg.OPT_POSE = True
+            with Timer(f'Optimize 3D Pose/{nFrames} frames'):
+                params = optimizePose3D(body_model, params, chunk_kp3d, weight=weight_pose, cfg=cfg)
+            return params
 
         def smpl_from_keypoints3d_chunked(body_model, kp3ds, weight_shape, weight_pose, init_shapes):
             nFrames = kp3ds.shape[0]
@@ -454,10 +479,7 @@ for selected_vid_idx in selected_vid_idxs:
                 chunk_end = min(chunk_start + CHUNK_SIZE, nFrames)
                 chunk_kp3d = kp3ds[chunk_start:chunk_end]
                 print(f"  [chunked] frames {chunk_start}-{chunk_end-1}")
-                chunk_params = smpl_from_keypoints3d(body_model, chunk_kp3d,
-                    config=dataset_config, args=args,
-                    weight_shape=weight_shape, weight_pose=weight_pose,
-                    init_shapes=shapes)
+                chunk_params = optimize_chunk(body_model, chunk_kp3d, shapes, weight_pose)
                 rh_list.append(chunk_params['Rh'])
                 th_list.append(chunk_params['Th'])
                 poses_list.append(chunk_params['poses'])
