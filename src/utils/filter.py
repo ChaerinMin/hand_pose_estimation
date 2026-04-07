@@ -1,6 +1,7 @@
 import numpy as np
 import math
 from scipy.signal import savgol_filter
+from scipy.spatial.transform import Rotation
 
 
 def _reject_outliers_1d(signal, window=5, threshold=3.0):
@@ -114,6 +115,110 @@ def _clamp_savgol_params(T, window, polyorder):
     window = min(window, T if T % 2 == 1 else T - 1)
     polyorder = min(polyorder, window - 1)
     return window, polyorder
+
+
+def canonicalize_rotvec_sequence(rotvecs):
+    """Make axis-angle (rotation vector) sequence consistent across the π singularity.
+
+    Near θ=π, the same rotation has two equivalent representations:
+      r  (with |r| = θ)  and  -r * (2π - θ)/θ  (with |r'| = 2π - θ)
+    The MANO optimizer can settle on either form per frame, causing large apparent
+    jumps in the stored Rh even when the actual hand orientation is smooth.
+
+    Converts to quaternion space, enforces sign continuity (consecutive quaternions
+    must have positive dot product), then converts back to rotation vectors.
+    """
+    if len(rotvecs) < 2:
+        return rotvecs.copy()
+    quats = Rotation.from_rotvec(rotvecs).as_quat()  # (T, 4) xyzw
+    for i in range(1, len(quats)):
+        if np.dot(quats[i], quats[i - 1]) < 0:
+            quats[i] = -quats[i]
+    return Rotation.from_quat(quats).as_rotvec()
+
+
+def reject_rotation_outliers(rotvecs, window=5, threshold=0.5):
+    """Outlier rejection for a rotation sequence (T, 3) in axis-angle form.
+
+    Uses geodesic distance in SO(3) rather than Euclidean distance on the
+    axis-angle vectors, which breaks down near the π singularity.
+    Outlier frames (geodesic distance to window median > threshold radians) are
+    replaced by SLERP-interpolated rotations from nearest valid neighbours.
+    """
+    T = len(rotvecs)
+    if T < 3:
+        return rotvecs.copy()
+    half = window // 2
+    rots = Rotation.from_rotvec(rotvecs)
+    quats = rots.as_quat()  # (T, 4)
+
+    # Ensure quaternion sign consistency before distance computation
+    for i in range(1, T):
+        if np.dot(quats[i], quats[i - 1]) < 0:
+            quats[i] = -quats[i]
+
+    is_outlier = np.zeros(T, dtype=bool)
+    global_med_rot = Rotation.from_rotvec(np.median(rotvecs, axis=0))
+    global_mad = np.median([rots[t].inv() * global_med_rot for t in range(T)]) if False else None
+
+    for t in range(T):
+        lo, hi = max(0, t - half), min(T, t + half + 1)
+        window_quats = quats[lo:hi]
+        # Median quaternion: use component-wise median then re-normalize
+        med_q = np.median(window_quats, axis=0)
+        med_q /= np.linalg.norm(med_q)
+        med_rot = Rotation.from_quat(med_q)
+        # Geodesic distance = |log(R_t^{-1} R_med)|
+        diff_rot = Rotation.from_quat(quats[t]).inv() * med_rot
+        angle = np.linalg.norm(diff_rot.as_rotvec())
+        if angle > threshold:
+            is_outlier[t] = True
+
+    n_outliers = int(is_outlier.sum())
+    if n_outliers == 0:
+        return Rotation.from_quat(quats).as_rotvec()
+
+    print(f"  [rotation outlier rejection] {n_outliers}/{T} frames rejected")
+    valid = np.where(~is_outlier)[0]
+    if len(valid) < 2:
+        return Rotation.from_quat(quats).as_rotvec()
+
+    # SLERP-interpolate bad frames from valid neighbours
+    cleaned_quats = quats.copy()
+    all_t = np.arange(T, dtype=float)
+    slerp = Rotation.from_quat(quats[valid])
+    interp_rots = Rotation.concatenate(
+        [slerp[0]] * T  # fallback; overwritten below
+    )
+    # Use scipy's Slerp
+    from scipy.spatial.transform import Slerp
+    slerp_fn = Slerp(valid.astype(float), Rotation.from_quat(quats[valid]))
+    interp_quats = slerp_fn(np.clip(all_t, valid[0], valid[-1])).as_quat()
+    cleaned_quats[is_outlier] = interp_quats[is_outlier]
+    return Rotation.from_quat(cleaned_quats).as_rotvec()
+
+
+def apply_savgol_filter_rotvec(rotvecs, window=11, polyorder=3):
+    """Savitzky-Golay smoothing for a rotation sequence (T, 3) in axis-angle form.
+
+    Smoothing is performed in quaternion space (with sign consistency enforced)
+    to avoid artifacts from the axis-angle π singularity, then converted back
+    to rotation vectors.
+    """
+    T = len(rotvecs)
+    if T < 2:
+        return rotvecs.copy()
+    window, polyorder = _clamp_savgol_params(T, window, polyorder)
+    quats = Rotation.from_rotvec(rotvecs).as_quat()  # (T, 4)
+    for i in range(1, T):
+        if np.dot(quats[i], quats[i - 1]) < 0:
+            quats[i] = -quats[i]
+    smoothed = quats.copy()
+    for i in range(4):
+        smoothed[:, i] = savgol_filter(quats[:, i], window_length=window, polyorder=polyorder)
+    norms = np.linalg.norm(smoothed, axis=1, keepdims=True)
+    smoothed /= np.where(norms > 1e-8, norms, 1.0)
+    return Rotation.from_quat(smoothed).as_rotvec()
 
 
 def apply_savgol_filter_2d(signal, window=11, polyorder=3):

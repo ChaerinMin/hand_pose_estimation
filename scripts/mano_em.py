@@ -14,7 +14,7 @@ from src.utils.cameras import (get_projections, map_camera_names,
                                removed_cameras)
 from src.utils.easymocap_utils import (load_model, projectN3, vis_repro,
                                        vis_smpl)
-from src.utils.filter import apply_one_euro_filter_2d, apply_one_euro_filter_3d, apply_savgol_filter_2d, apply_savgol_filter_3d, reject_outliers_median_2d, reject_outliers_median_3d
+from src.utils.filter import apply_one_euro_filter_2d, apply_one_euro_filter_3d, apply_savgol_filter_2d, apply_savgol_filter_3d, apply_savgol_filter_rotvec, reject_outliers_median_2d, reject_outliers_median_3d, canonicalize_rotvec_sequence, reject_rotation_outliers
 from src.utils.parser import add_common_args
 from src.utils.reader_v2 import Reader
 from src.utils.video_handler import convert_video_ffmpeg, create_video_writer
@@ -494,14 +494,42 @@ for selected_vid_idx in selected_vid_idxs:
         # smooth mano parameters
         if args.to_smooth:
             print('Smoothing Manos...')
+            def smooth_params_per_segment(params, frame_indices):
+                """Apply smoothing within each contiguous temporal segment independently.
+                Prevents savgol from blending across gaps where the hand was absent.
+                Rh (global rotation) is canonicalized in quaternion space first to remove
+                axis-angle π-singularity flip artifacts before smoothing."""
+                frames = np.array(frame_indices)
+                diffs = np.diff(frames)
+                boundaries = np.where(diffs > 1)[0] + 1
+                seg_starts = np.concatenate([[0], boundaries])
+                seg_ends = np.concatenate([boundaries, [len(frames)]])
+                for start, end in zip(seg_starts, seg_ends):
+                    for key in ('Rh', 'Th', 'poses'):
+                        seg = params[key][start:end]
+                        if len(seg) < 2:
+                            continue
+                        if key == 'Rh':
+                            seg = canonicalize_rotvec_sequence(seg)
+                            # 0.5 rad (~29°) geodesic threshold: catches bad MANO local minima
+                            # without over-rejecting legitimate fast hand rotations
+                            seg = reject_rotation_outliers(seg, window=args.outlier_window, threshold=0.5)
+                            if args.savgol:
+                                seg = apply_savgol_filter_rotvec(seg, window=args.savgol_window, polyorder=args.savgol_polyorder)
+                            else:
+                                seg = apply_one_euro_filter_2d(seg, mincutoff=0.5, beta=0.0, dcutoff=1.0)
+                        else:
+                            if args.outlier_rejection:
+                                seg = reject_outliers_median_2d(seg, window=args.outlier_window, threshold=args.outlier_threshold)
+                            if args.savgol:
+                                seg = apply_savgol_filter_2d(seg, window=args.savgol_window, polyorder=args.savgol_polyorder)
+                            else:
+                                seg = apply_one_euro_filter_2d(seg, mincutoff=0.5, beta=0.0, dcutoff=1.0)
+                        params[key][start:end] = seg
             if right_valid:
-                for key in ('Rh', 'Th', 'poses'):
-                    data = reject_outliers_median_2d(params_right[key], window=args.outlier_window, threshold=args.outlier_threshold) if args.outlier_rejection else params_right[key]
-                    params_right[key] = apply_savgol_filter_2d(data, window=args.savgol_window, polyorder=args.savgol_polyorder) if args.savgol else apply_one_euro_filter_2d(data, mincutoff=0.5, beta=0.0, dcutoff=1.0)
+                smooth_params_per_segment(params_right, chosen_frames_right)
             if left_valid:
-                for key in ('Rh', 'Th', 'poses'):
-                    data = reject_outliers_median_2d(params_left[key], window=args.outlier_window, threshold=args.outlier_threshold) if args.outlier_rejection else params_left[key]
-                    params_left[key] = apply_savgol_filter_2d(data, window=args.savgol_window, polyorder=args.savgol_polyorder) if args.savgol else apply_one_euro_filter_2d(data, mincutoff=0.5, beta=0.0, dcutoff=1.0)
+                smooth_params_per_segment(params_left, chosen_frames_left)
 
         # json dump mano
         manos_params = {}
