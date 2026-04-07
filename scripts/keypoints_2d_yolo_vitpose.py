@@ -13,15 +13,43 @@ from ultralytics import YOLO, checks
 from typing import Dict, Optional
 from collections import defaultdict
 
+import cv2
 import sys
 sys.path.append(".")
 from src.utils.reader_v2 import Reader
-from src.utils.video_handler import frame_preprocess
+from src.utils.video_handler import frame_preprocess, create_video_writer, convert_video_ffmpeg
 from src.utils.cameras import removed_cameras, map_camera_names, get_projections
 import src.utils.params as param_utils
 from src.utils.parser import add_common_args
 from src.vitpose_wrapper import ViTPoseModel
 from src.hamer_wrapper import HAMER_CKPT_PATH, ViTDetDataset, recursive_clear
+
+HAND_SKELETON = [
+    (0,1),(1,2),(2,3),(3,4),
+    (0,5),(5,6),(6,7),(7,8),
+    (0,9),(9,10),(10,11),(11,12),
+    (0,13),(13,14),(14,15),(15,16),
+    (0,17),(17,18),(18,19),(19,20),
+]
+LEFT_HAND_COLOR = (255, 50, 50)
+RIGHT_HAND_COLOR = (50, 50, 255)
+
+
+def draw_hand_keypoints_on_image(image, left_kps, right_kps, conf_thresh=0.3):
+    """Draw left (blue) and right (red) hand keypoints on image.
+    left_kps, right_kps: (21, 3) arrays [x, y, conf]
+    """
+    vis = image.copy() if isinstance(image, np.ndarray) else np.array(image)
+    for kps, color in [(left_kps, LEFT_HAND_COLOR), (right_kps, RIGHT_HAND_COLOR)]:
+        for i, j in HAND_SKELETON:
+            if kps[i, 2] > conf_thresh and kps[j, 2] > conf_thresh:
+                cv2.line(vis, (int(kps[i, 0]), int(kps[i, 1])),
+                         (int(kps[j, 0]), int(kps[j, 1])), color, 2, cv2.LINE_AA)
+        for k in range(21):
+            if kps[k, 2] > conf_thresh:
+                cv2.circle(vis, (int(kps[k, 0]), int(kps[k, 1])), 3, color, -1, cv2.LINE_AA)
+    return vis
+
 
 # ------------------------------ Alpha Pose Helpers ------------------------------ #
 os.system("module load ffmpeg")
@@ -107,8 +135,8 @@ def process_all_vitposes(pred_poses, kps_left_f=None, bbx_left_f=None, kps_right
         right_hand_keyps = keypoints_all[:, -21:, :]
 
         # Process each hand
-        left_bboxes, left_keyps, left_valid_counts = process_hand_keypoints_batch(left_hand_keyps, 0.5, 3)
-        right_bboxes, right_keyps, right_valid_counts = process_hand_keypoints_batch(right_hand_keyps, 0.5, 3)
+        left_bboxes, left_keyps, left_valid_counts = process_hand_keypoints_batch(left_hand_keyps, 0.7, 12)
+        right_bboxes, right_keyps, right_valid_counts = process_hand_keypoints_batch(right_hand_keyps, 0.7, 12)
 
         # To identify best left and right hands, consider a criteria, e.g., max valid keypoints
         best_left_index = np.argmax(left_valid_counts)
@@ -363,7 +391,27 @@ def main():
                     else:
                         for pred_pose in pred_poses:
                             processed_pose = process_all_vitposes(pred_pose, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f)
-            time_list.append(time.time() - start_time)            
-        
+            time_list.append(time.time() - start_time)
+
+            # Per-camera 2D keypoint visualization
+            vis_path = os.path.join(args.out_dir, 'vis', 'keypoints_2d',
+                                    f'{selected_vid_idx:03d}', f"{video_name}.mp4")
+            os.makedirs(os.path.dirname(vis_path), exist_ok=True)
+            vis_writer = create_video_writer(vis_path, (im_w, im_h), fps=30)
+            with open(output_kps_left_file_path, 'r') as kl, \
+                 open(output_kps_right_file_path, 'r') as kr:
+                for frame, left_line, right_line in zip(orig_imgs, kl, kr):
+                    if frame is None:
+                        frame_vis = np.zeros((im_h, im_w, 3), dtype=np.uint8)
+                    else:
+                        frame_vis = frame if isinstance(frame, np.ndarray) else np.array(frame)
+                    left_kps = np.array(ujson.loads(left_line.strip())).reshape(21, 3)
+                    right_kps = np.array(ujson.loads(right_line.strip())).reshape(21, 3)
+                    vis_frame = draw_hand_keypoints_on_image(frame_vis, left_kps, right_kps)
+                    vis_writer.write(cv2.cvtColor(vis_frame, cv2.COLOR_RGB2BGR))
+            vis_writer.release()
+            convert_video_ffmpeg(vis_path)
+
+
 if __name__ == '__main__':
     main()

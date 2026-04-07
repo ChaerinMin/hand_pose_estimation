@@ -3,6 +3,7 @@ import sys
 import ujson
 import shutil
 import argparse
+import cv2
 import numpy as np
 from tqdm import tqdm
 sys.path.append(".")
@@ -13,6 +14,48 @@ from src.utils.cameras import removed_cameras, map_camera_names, get_projections
 from src.utils.fingers import FINGER_IDX, TIP_IDX
 from src.triangulate import triangulate_joints, ransac_processor
 from src.utils.filter import apply_one_euro_filter_3d, apply_savgol_filter_3d, reject_outliers_median_3d
+from src.utils.video_handler import create_video_writer, convert_video_ffmpeg
+
+
+HAND_SKELETON = [
+    (0,1),(1,2),(2,3),(3,4),
+    (0,5),(5,6),(6,7),(7,8),
+    (0,9),(9,10),(10,11),(11,12),
+    (0,13),(13,14),(14,15),(15,16),
+    (0,17),(17,18),(18,19),(19,20),
+]
+LEFT_HAND_COLOR = (255, 50, 50)
+RIGHT_HAND_COLOR = (50, 50, 255)
+
+
+def projectN3(kpts3d, Pall):
+    """Project 3D keypoints to multiple camera views.
+    kpts3d: (N_kpts, 4) [x, y, z, conf]
+    Returns: (N_views, N_kpts, 3) [x, y, conf]
+    """
+    N_views = len(Pall)
+    N_kpts = kpts3d.shape[0]
+    kpts2d = np.zeros((N_views, N_kpts, 3))
+    for nv in range(N_views):
+        kp_homo = np.hstack([kpts3d[:, :3], np.ones((N_kpts, 1))])
+        kp_proj = (Pall[nv] @ kp_homo.T).T
+        kpts2d[nv, :, :2] = kp_proj[:, :2] / kp_proj[:, 2:3]
+        kpts2d[nv, :, 2] = kpts3d[:, 3]
+    return kpts2d
+
+
+def draw_hand_kps_on_image(image, left_kps, right_kps, conf_thresh=0.3):
+    """Draw left (blue) and right (red) hand keypoints on a BGR image."""
+    vis = image.copy()
+    for kps, color in [(left_kps, LEFT_HAND_COLOR), (right_kps, RIGHT_HAND_COLOR)]:
+        for i, j in HAND_SKELETON:
+            if kps[i, 2] > conf_thresh and kps[j, 2] > conf_thresh:
+                cv2.line(vis, (int(kps[i, 0]), int(kps[i, 1])),
+                         (int(kps[j, 0]), int(kps[j, 1])), color, 2, cv2.LINE_AA)
+        for k in range(21):
+            if kps[k, 2] > conf_thresh:
+                cv2.circle(vis, (int(kps[k, 0]), int(kps[k, 1])), 4, color, -1, cv2.LINE_AA)
+    return vis
 
 sys.path.append("./EasyMocap")
 from myeasymocap.operations.triangulate import SimpleTriangulate
@@ -371,3 +414,52 @@ for selected_vid_idx in selected_vid_idxs:
         ujson.dump(chosen_frames_left, f, indent=2)
     with open(chosen_path_right, "w") as f:
         ujson.dump(chosen_frames_right, f, indent=2)
+
+    # Reprojection visualization
+    print("Creating reprojection visualization...")
+    use_parsed = (args.stage == 2)
+    vis_dir = os.path.join(args.out_dir, 'vis', 'repro_3d', str(selected_vid_idx).zfill(3))
+    os.makedirs(vis_dir, exist_ok=True)
+    vis_path = os.path.join(vis_dir, 'repro.mp4')
+
+    im_h, im_w = int(params["height"][0]), int(params["width"][0])
+    grid_cols = int(np.ceil(np.sqrt(len(cur_cam_names) * 1.5)))
+    grid_rows = int(np.ceil(len(cur_cam_names) / grid_cols))
+    scale_factor = 1000 / (grid_rows * im_h)
+    scaled_w = int(im_w * scale_factor)
+    scaled_h = int(im_h * scale_factor)
+    vis_writer = create_video_writer(vis_path, (scaled_w * grid_cols, scaled_h * grid_rows), fps=30)
+
+    if use_parsed:
+        parsed_dir = os.path.join(args.root_dir, args.seq_path, args.multisequence, 'parsed')
+
+    for l_idx in tqdm(chosen_frames, desc="Creating visualization"):
+        if l_idx >= len(all_keypoints3d_left):
+            break
+        kp3d_left = all_keypoints3d_left[l_idx]
+        kp3d_right = all_keypoints3d_right[l_idx]
+        kp2d_left = projectN3(kp3d_left, projs)
+        kp2d_right = projectN3(kp3d_right, projs)
+
+        vis_images = []
+        for cam_idx, cam in enumerate(cur_cam_names):
+            if use_parsed and cam in cam_mapper:
+                frame_path = os.path.join(parsed_dir, f"timestamp_{l_idx}", "images",
+                                          f"{cam_mapper[cam]}.jpg")
+                img = cv2.imread(frame_path) if os.path.exists(frame_path) \
+                    else np.ones((im_h, im_w, 3), dtype=np.uint8) * 200
+            else:
+                img = np.ones((im_h, im_w, 3), dtype=np.uint8) * 200
+            img_vis = draw_hand_kps_on_image(img, kp2d_left[cam_idx], kp2d_right[cam_idx])
+            cv2.putText(img_vis, cam, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 255), 2)
+            vis_images.append(cv2.resize(img_vis, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR))
+
+        collage = np.zeros((scaled_h * grid_rows, scaled_w * grid_cols, 3), dtype=np.uint8)
+        for idx, img in enumerate(vis_images):
+            row, col = idx // grid_cols, idx % grid_cols
+            collage[row*scaled_h:(row+1)*scaled_h, col*scaled_w:(col+1)*scaled_w] = img
+        vis_writer.write(collage)
+
+    vis_writer.release()
+    convert_video_ffmpeg(vis_path)
+    print(f"Visualization saved to: {vis_path}")

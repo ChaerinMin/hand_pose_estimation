@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//oscar/data/ssrinath/users/cmin5/non-rigid-hoi/**)",
+      "Read(//oscar/data/ssrinath/public/brics-mini/2026-04-03/multisequence000001/outputs/hand/intermediate/keypoints_3d/**)",
+      "Read(//oscar/data/ssrinath/public/brics-mini/2026-04-03/multisequence000001/outputs/hand/**)",
+      "Bash(conda run -n zeronvs --no-capture-output python3 -c ':*)"
+    ]
+  }
+}
