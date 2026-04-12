@@ -433,26 +433,29 @@ for selected_vid_idx in selected_vid_idxs:
         SHAPE_SAMPLE = 100
 
         def optimize_chunk(body_model, chunk_kp3d, shapes, weight_pose):
-            """Fixed shape, global RT without smooth losses, then full pose with original weights."""
+            """Fixed shape; all stages start without smoothness to avoid local minima at zero initialization."""
             nFrames = chunk_kp3d.shape[0]
             params = body_model.init_params(nFrames=nFrames)
             params['shapes'] = shapes.copy()
             cfg = Config(args)
             cfg.device = body_model.device
             cfg.model_type = body_model.model_type
-            # Stage 1: global RT only, no smoothness (avoids local minimum near Rh=0)
-            weight_global = {k: v for k, v in weight_pose.items()}
-            weight_global['smooth_body'] = 0.0
-            weight_global['smooth_poses'] = 0.0
+            weight_no_smooth = {k: v for k, v in weight_pose.items()}
+            weight_no_smooth['smooth_body'] = 0.0
+            weight_no_smooth['smooth_poses'] = 0.0
+            # Stage 1: global RT, no smoothness
             cfg.OPT_R = True
             cfg.OPT_T = True
             cfg.GLOBAL_ONLY = True
             with Timer('Optimize global RT'):
-                params = optimizePose3D(body_model, params, chunk_kp3d, weight=weight_global, cfg=cfg)
+                params = optimizePose3D(body_model, params, chunk_kp3d, weight=weight_no_smooth, cfg=cfg)
             cfg.GLOBAL_ONLY = False
-            # Stage 2: full pose with original weights
+            # Stage 2: pose, no smoothness (avoids poses=0 local minimum)
             cfg.OPT_POSE = True
-            with Timer(f'Optimize 3D Pose/{nFrames} frames'):
+            with Timer(f'Optimize 3D Pose/{nFrames} frames (no smooth)'):
+                params = optimizePose3D(body_model, params, chunk_kp3d, weight=weight_no_smooth, cfg=cfg)
+            # Stage 3: refinement with full smoothness weights
+            with Timer(f'Optimize 3D Pose/{nFrames} frames (smooth)'):
                 params = optimizePose3D(body_model, params, chunk_kp3d, weight=weight_pose, cfg=cfg)
             return params
 

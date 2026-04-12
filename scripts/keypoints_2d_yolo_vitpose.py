@@ -193,7 +193,7 @@ def main():
     parser = argparse.ArgumentParser(description='2D Keypoint Detection')
     add_common_args(parser)
     parser.add_argument("--use_optim_params", action="store_true")
-    parser.add_argument('--batch_size', type=int, default=256, help='Batch Size')
+    parser.add_argument('--batch_size', type=int, default=64, help='Batch Size')
     parser.add_argument('--box_score_threshold', type=float, default=0.2, help='Confidence Threshold for BBX Detection')
     parser.add_argument('--yolo_model', type=str, default='yolov9c.pt', help='YOLO Model for BBX Detection')
     parser.add_argument('--remove_side_cam', type=bool, default=True, help='Remove Side Cameras')
