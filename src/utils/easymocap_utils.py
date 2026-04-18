@@ -105,7 +105,8 @@ def vis_repro(args, images, kpts_repro, nf, config, to_img=True, mode='repro', o
             if confident is not None and confident[cname]:
                 h, w = img.shape[:2]
                 thickness = max(4, min(h, w) // 60)
-                cv2.rectangle(img, (0, 0), (w - 1, h - 1), (0, 0, 255), thickness)
+                t = thickness // 2
+                cv2.rectangle(img, (t, t), (w - 1 - t, h - 1 - t), (0, 0, 255), thickness)
         images_vis.append(img)
     if len(images_vis) > 1:
         images_vis = merge(images_vis, resize=not args.save_origin)

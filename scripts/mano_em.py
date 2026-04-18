@@ -116,6 +116,7 @@ output.add_argument('--vis_smpl', action='store_true')
 output.add_argument('--save_frame', action='store_true')
 output.add_argument('--save_mesh', action='store_true')
 output.add_argument("--confidence_thresh", type=float, default=None, help="camera conficence")
+output.add_argument("--kp3d_reproj_thresh", type=float, default=50.0, help="Exclude cameras whose mean kp3d reprojection error exceeds this threshold (px). Set to 0 to disable.")
 args = parser.parse_args()
 args.out_dir = os.path.join(args.out_dir, "hand")
 
@@ -184,17 +185,29 @@ else:
     selected_vid_idxs = [args.ith]
 
 # camera confidence
-if args.confidence_thresh is not None:
-    conf_path = os.path.join(
-        args.root_dir, args.seq_path, args.multisequence, "calib", "image_confidence.json"
-    )
+conf_path = os.path.join(
+    args.root_dir, args.seq_path, args.multisequence, "calib", "image_confidence.json"
+)
+image_confidence = None
+confident = None
+kp3d_bad_cams = set()  # cameras to completely exclude from visualization
+
+if args.confidence_thresh is not None or args.kp3d_reproj_thresh > 0:
     with open(conf_path, "r") as f:
         image_confidence = ujson.load(f)
+
+if args.confidence_thresh is not None and image_confidence is not None:
+    # num_visible_3D_points filter: controls red border in visualization
     confident = {}
     for k, v in image_confidence.items():
         confident[k.replace(".jpg", "")] = v["num_visible_3D_points"] >= float(args.confidence_thresh)
-else:
-    confident = None
+
+if args.kp3d_reproj_thresh > 0 and image_confidence is not None:
+    # kp3d_reproj_error filter: completely exclude from visualization
+    for k, v in image_confidence.items():
+        kp3d_err = v.get("kp3d_reproj_error", -1.0)
+        if kp3d_err >= 0 and kp3d_err > args.kp3d_reproj_thresh:
+            kp3d_bad_cams.add(k.replace(".jpg", ""))
 
 if args.video_dir:
     video_dir = os.path.join(args.video_dir, args.seq_path)
@@ -250,6 +263,22 @@ for selected_vid_idx in selected_vid_idxs:
 
     # load camera parameters
     intrs, projs, dist_intrs, dists, cameras = get_projections(args, params, cur_cam_names, cam_mapper, easymocap_format=True)
+
+    # Build visualization camera filter (exclude cameras that fail kp3d_reproj_thresh)
+    bad_cams_vis = {c for c in cur_cam_names if c in cam_mapper and c in kp3d_bad_cams}
+    cam_mapper_list = [c for c in cur_cam_names if c in cam_mapper]
+    vis_img_indices = [i for i, c in enumerate(cam_mapper_list) if c not in bad_cams_vis]
+    vis_projs = [projs[i] for i in vis_img_indices]
+    vis_cameras = {}
+    for k, v in cameras.items():
+        if k == 'names':
+            vis_cameras[k] = [v[i] for i in vis_img_indices]
+        elif isinstance(v, np.ndarray) and v.ndim > 0 and len(v) == len(cam_mapper_list):
+            vis_cameras[k] = v[vis_img_indices]
+        else:
+            vis_cameras[k] = v
+    if bad_cams_vis:
+        print(f"[vis filter] Excluding from visualization: {sorted(bad_cams_vis)}")
 
     # load 2d keypoints
     all_keypoints2d_left, all_keypoints2d_right = [], []
@@ -693,6 +722,7 @@ for selected_vid_idx in selected_vid_idxs:
                             image = param_utils.undistort_image(intrs[c_idx], dist_intrs[c_idx], dists[c_idx], image)
                         c_idx += 1
                         images.append(image)
+                vis_images = [images[i] for i in vis_img_indices]
 
                 nf_right = frame_to_right_nf.get(chosen_f)
                 nf_left = frame_to_left_nf.get(chosen_f)
@@ -721,8 +751,8 @@ for selected_vid_idx in selected_vid_idxs:
                             vertices = vertices_left_scaled
                             faces = body_model_left.faces
                         image_vis, render_results = vis_smpl(
-                            args, vertices=vertices, faces=faces, images=images,
-                            nf=nf, cameras=cameras, add_back=True, out_dir="",
+                            args, vertices=vertices, faces=faces, images=vis_images,
+                            nf=nf, cameras=vis_cameras, add_back=True, out_dir="",
                             confident=confident, save_frames=False
                         )
                         # if args.vis_smpl:
@@ -756,9 +786,9 @@ for selected_vid_idx in selected_vid_idxs:
                             keypoints = keypoints3d_right[abs_idx]
                         else:
                             keypoints = keypoints3d_left[abs_idx]
-                        kpts_repro = projectN3(keypoints, projs)
+                        kpts_repro = projectN3(keypoints, vis_projs)
                         kpts_repro[:, :, 2] = 0.5
-                        image_vis = vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_3d_path, cameras=cameras, confident=confident)
+                        image_vis = vis_repro(args, vis_images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_3d_path, cameras=vis_cameras, confident=confident)
                         # image_vis = cv2.addWeighted(image_vis, 0.7, image_kps, 0.3, 0)
                         if abs_idx == 0:
                             outhand_3d = create_video_writer(outhand_3d_path+".mp4", (image_vis.shape[1], image_vis.shape[0]), fps=30)
@@ -777,9 +807,9 @@ for selected_vid_idx in selected_vid_idxs:
                         joints = joints_right
                     else:
                         joints = joints_left
-                    joints_repro = projectN3(joints, projs)
+                    joints_repro = projectN3(joints, vis_projs)
                     joints_repro[:, :, 2] = 0.5
-                    image_vis = vis_repro(args, render_results, joints_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outjoint_3d_path, cameras=cameras, confident=confident)
+                    image_vis = vis_repro(args, render_results, joints_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outjoint_3d_path, cameras=vis_cameras, confident=confident)
                     if abs_idx == 0:
                         outjoint_3d = create_video_writer(outjoint_3d_path+".mp4", (image_vis.shape[1], image_vis.shape[0]), fps=30)
                     outjoint_3d.write(image_vis)
@@ -792,8 +822,8 @@ for selected_vid_idx in selected_vid_idxs:
                             keypoints2d = all_keypoints2d_right[abs_idx]
                         else:
                             keypoints2d = all_keypoints2d_left[abs_idx]
-                        kpts_repro = keypoints2d
-                        image_vis = vis_repro(args, images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_2d_path, cameras=cameras, confident=confident)
+                        kpts_repro = keypoints2d[vis_img_indices]
+                        image_vis = vis_repro(args, vis_images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_2d_path, cameras=vis_cameras, confident=confident)
                         if abs_idx == 0:
                             outhand_2d = create_video_writer(outhand_2d_path+".mp4", (image_vis.shape[1], image_vis.shape[0]), fps=30)
                         outhand_2d.write(image_vis)

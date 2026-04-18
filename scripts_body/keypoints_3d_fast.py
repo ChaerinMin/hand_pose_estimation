@@ -181,6 +181,7 @@ def main():
     parser.add_argument("--all_frames", default=False, action="store_true")
     parser.add_argument("--easymocap", default=False, action="store_true", help='Use EasyMocap triangulation')
     parser.add_argument("--confidence_thresh", type=float, default=None, help="Camera confidence threshold")
+    parser.add_argument("--kp3d_reproj_thresh", type=float, default=50.0, help="Exclude cameras whose mean kp3d reprojection error exceeds this threshold (px). Set to 0 to disable.")
     parser.add_argument("--optimize_bad_views", action="store_true", help="Optimize extrinsics of bad views")
     # parser.add_argument("--vis_repro", action="store_true", help="Visualize reprojected 3D keypoints")
     args = parser.parse_args()
@@ -245,13 +246,14 @@ def main():
         selected_vid_idxs = [args.ith]
 
     # Camera confidence
-    if args.confidence_thresh is not None:
-        # conf_dir = args.out_dir[:args.out_dir.index("/stage")]
-        conf_path = os.path.join(
-            args.root_dir, args.seq_path, args.multisequence, "calib", "image_confidence.json"
-        )
+    conf_path = os.path.join(
+        args.root_dir, args.seq_path, args.multisequence, "calib", "image_confidence.json"
+    )
+    if args.confidence_thresh is not None or args.kp3d_reproj_thresh > 0:
         with open(conf_path, "r") as f:
             image_confidence = ujson.load(f)
+    else:
+        image_confidence = None
 
     for selected_vid_idx in selected_vid_idxs:
         print(f'Video ID {selected_vid_idx}...')
@@ -360,6 +362,10 @@ def main():
                 if args.confidence_thresh is not None:
                     cam_conf = image_confidence[cam + ".jpg"]["num_visible_3D_points"]
                     cam_confidence.append(cam_conf)
+                elif args.kp3d_reproj_thresh > 0 and image_confidence is not None:
+                    entry = image_confidence.get(cam + ".jpg", {})
+                    kp3d_err = entry.get("kp3d_reproj_error", -1.0)
+                    cam_confidence.append(kp3d_err)
 
         all_keypoints2d = np.asarray(all_keypoints2d)  # (N_cams, N_frames, 133, 3)
         cam_confidence = np.asarray(cam_confidence)
@@ -395,6 +401,9 @@ def main():
 
                     if args.confidence_thresh is not None:
                         valid = np.logical_and(valid, cam_confidence >= float(args.confidence_thresh))
+                    elif args.kp3d_reproj_thresh > 0 and len(cam_confidence) > 0:
+                        kp3d_ok = np.array([(e < 0 or e <= args.kp3d_reproj_thresh) for e in cam_confidence])
+                        valid = np.logical_and(valid, kp3d_ok)
 
                     if not valid.any():
                         keypoints3d = np.zeros((NUM_KEYPOINTS, 4))
@@ -440,20 +449,37 @@ def main():
                         f3d.write('\n')
 
         # Optimize camera extrinsics
+        all_kp2d = all_keypoints2d.reshape(all_keypoints2d.shape[0], -1, 3)  # (N_cams, N_frames*133, 3)
+        all_kp3d = all_keypoints3d.reshape(-1, 4)  # (N_frames*133, 4)
         if args.optimize_bad_views:
-            # Reshape for optimization
-            all_kp2d = all_keypoints2d.reshape(all_keypoints2d.shape[0], -1, 3)  # (N_cams, N_frames*133, 3)
-            all_kp3d = all_keypoints3d.reshape(-1, 4)  # (N_frames*133, 4)
-
-            new_rot, new_tr = param_utils.optimize_extrinsics(
+            new_rot, new_tr, per_cam_errors = param_utils.optimize_extrinsics(
                 cameras, all_kp2d, all_kp3d, inspect_only=False
             )
             new_params_path = os.path.join(calib_dir, "new_params.txt")
             param_utils.update_extrinsics(new_params_path, params, new_rot, new_tr)
         else:
-            all_kp2d = all_keypoints2d.reshape(all_keypoints2d.shape[0], -1, 3)
-            all_kp3d = all_keypoints3d.reshape(-1, 4)
-            param_utils.optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=True)
+            _, _, per_cam_errors = param_utils.optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=True)
+
+        # Write kp3d_reproj_error back to image_confidence.json
+        if per_cam_errors:
+            with open(conf_path, "r") as f:
+                conf_data = ujson.load(f)
+            for cam_name, err in per_cam_errors.items():
+                key = cam_name + ".jpg"
+                if key not in conf_data:
+                    conf_data[key] = {"image_name": key}
+                conf_data[key]["kp3d_reproj_error"] = err
+            with open(conf_path, "w") as f:
+                ujson.dump(conf_data, f, indent=4)
+            print(f"Updated kp3d_reproj_error in {conf_path}")
+
+        # Build set of cameras to exclude from visualization
+        bad_cams_vis = set()
+        if args.kp3d_reproj_thresh > 0:
+            for cam_name, err in per_cam_errors.items():
+                if err >= 0 and err > args.kp3d_reproj_thresh:
+                    bad_cams_vis.add(cam_name)
+                    print(f"[kp3d_reproj_thresh] Excluding {cam_name} from visualization (error={err:.1f}px)")
 
         chosen_path = os.path.join(keypoints3d_dir, "chosen_frames.json")
         with open(chosen_path, "w") as f:
@@ -471,14 +497,17 @@ def main():
             # multiseq_dir = args.out_dir[:args.out_dir.index("calib")]
             parsed_dir = os.path.join(args.root_dir, args.seq_path, args.multisequence, "parsed")
 
+        vis_cam_names = [c for c in cur_cam_names if c not in bad_cams_vis]
+        vis_cam_indices = [i for i, c in enumerate(cur_cam_names) if c not in bad_cams_vis]
+
         # Determine grid size
-        grid_cols = int(np.ceil(np.sqrt(len(cur_cam_names) * 1.5)))
+        grid_cols = int(np.ceil(np.sqrt(len(vis_cam_names) * 1.5)))
 
         # Get image dimensions from first frame
         im_h, im_w = int(params["height"][0]), int(params["width"][0])
 
         # Scale for collage
-        grid_rows = int(np.ceil(len(cur_cam_names) / grid_cols))
+        grid_rows = int(np.ceil(len(vis_cam_names) / grid_cols))
         target_height = 1000
         scale_factor = target_height / (grid_rows * im_h)
         scaled_w = int(im_w * scale_factor)
@@ -498,7 +527,7 @@ def main():
             if use_parsed:
                 timestamp_dir = os.path.join(parsed_dir, f"timestamp_{chosen_f}", "images")
                 frames = {}
-                for cam in cur_cam_names:
+                for cam in vis_cam_names:
                     if cam in cam_mapper:
                         frame_path = os.path.join(timestamp_dir, f"{cam}.jpg")
                         if os.path.exists(frame_path):
@@ -506,8 +535,7 @@ def main():
                         else:
                             frames[cam] = np.ones((im_h, im_w, 3), dtype=np.uint8) * 255
             else:
-                # Load from video (not implemented here)
-                frames = {cam: np.ones((im_h, im_w, 3), dtype=np.uint8) * 255 for cam in cur_cam_names}
+                frames = {cam: np.ones((im_h, im_w, 3), dtype=np.uint8) * 255 for cam in vis_cam_names}
 
             # Project 3D keypoints to 2D
             kp3d = all_keypoints3d[frame_idx]
@@ -516,7 +544,7 @@ def main():
 
             # Draw on each camera
             vis_images = []
-            for cam_idx, cam in enumerate(cur_cam_names):
+            for cam_idx, cam in zip(vis_cam_indices, vis_cam_names):
                 if cam not in frames:
                     continue
 

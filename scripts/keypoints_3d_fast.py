@@ -72,6 +72,7 @@ parser.add_argument('--remove_side_cam', type=bool, default=True, help='Remove S
 parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove Bottom Cameras')
 parser.add_argument("--ignore_missing_tip", action="store_true", help="Should a missing fingertip be allowed")
 parser.add_argument("--confidence_thresh", type=float, default=None, help="camera conficence")
+parser.add_argument("--kp3d_reproj_thresh", type=float, default=50.0, help="Exclude cameras whose mean kp3d reprojection error exceeds this threshold (px). Set to 0 to disable.")
 parser.add_argument("--optimize_bad_views", action="store_true", help="Whether to optimize extrinsics of bad views")
 parser.add_argument("--outlier_rejection", action="store_true", default=False, help="Reject outliers before smoothing (requires --to_smooth)")
 parser.add_argument("--savgol", action=argparse.BooleanOptionalAction, default=True, help="Use zero-phase Savitzky-Golay filter instead of One Euro filter (requires --to_smooth)")
@@ -79,7 +80,7 @@ parser.add_argument("--savgol_window", type=int, default=11, help="Window length
 parser.add_argument("--savgol_polyorder", type=int, default=3, help="Polynomial order for Savitzky-Golay filter")
 parser.add_argument("--outlier_window", type=int, default=5, help="Sliding window size for outlier rejection")
 parser.add_argument("--outlier_threshold", type=float, default=0.5, help="MAD multiplier threshold for outlier rejection")
-parser.add_argument("--min_run_length", type=int, default=3, help="Minimum consecutive frames a hand must appear to be kept; removes isolated false-positive detections")
+parser.add_argument("--min_run_length", type=int, default=5, help="Minimum consecutive frames a hand must appear to be kept; removes isolated false-positive detections")
 args = parser.parse_args()
 args.out_dir = os.path.join(args.out_dir, "hand")
 
@@ -144,13 +145,14 @@ else:
     selected_vid_idxs = [args.ith]
 
 # camera confidence
-if args.confidence_thresh is not None:
-    # conf_dir = args.out_dir[:args.out_dir.index("/stage")]
-    conf_path = os.path.join(
-        args.root_dir, args.seq_path, args.multisequence, "calib", "image_confidence.json"
-    )
+conf_path = os.path.join(
+    args.root_dir, args.seq_path, args.multisequence, "calib", "image_confidence.json"
+)
+if args.confidence_thresh is not None or args.kp3d_reproj_thresh > 0:
     with open(conf_path, "r") as f:
         image_confidence = ujson.load(f)
+else:
+    image_confidence = None
 
 for selected_vid_idx in selected_vid_idxs:
     print(f'Video ID {selected_vid_idx}...')
@@ -228,6 +230,11 @@ for selected_vid_idx in selected_vid_idxs:
             if args.confidence_thresh is not None:
                 cam_conf = image_confidence[cam+".jpg"]["num_visible_3D_points"]
                 cam_confidence.append(cam_conf)
+            elif args.kp3d_reproj_thresh > 0 and image_confidence is not None:
+                entry = image_confidence.get(cam+".jpg", {})
+                kp3d_err = entry.get("kp3d_reproj_error", -1.0)
+                # -1.0 means unmeasured (first run): treat as passing
+                cam_confidence.append(kp3d_err)
     all_keypoints2d_left = np.asarray(all_keypoints2d_left)
     all_keypoints2d_right = np.asarray(all_keypoints2d_right)
     cam_confidence = np.asarray(cam_confidence)
@@ -266,6 +273,11 @@ for selected_vid_idx in selected_vid_idxs:
                 if args.confidence_thresh is not None:
                     valid_left = np.logical_and(valid_left, cam_confidence >= float(args.confidence_thresh))
                     valid_right = np.logical_and(valid_right, cam_confidence >= float(args.confidence_thresh))
+                elif args.kp3d_reproj_thresh > 0 and len(cam_confidence) > 0:
+                    # -1.0 (unmeasured) passes; positive values must be below threshold
+                    kp3d_ok = np.array([(e < 0 or e <= args.kp3d_reproj_thresh) for e in cam_confidence])
+                    valid_left = np.logical_and(valid_left, kp3d_ok)
+                    valid_right = np.logical_and(valid_right, kp3d_ok)
                 if not args.easymocap:
                     keypoints3d_left, residuals = triangulate_joints(np.asarray(keypoints2d_left)[valid_left], np.asarray(projs)[valid_left], processor=ransac_processor, residual_threshold=10, min_samples=5)
                     print(f"Error: {residuals.mean()}")
@@ -376,13 +388,34 @@ for selected_vid_idx in selected_vid_idxs:
     all_kp2d = np.concatenate([all_kp2d_left, all_kp2d_right], axis=1)  # (view, points, 3)
     all_kp3d = np.concatenate([all_kp3d_left, all_kp3d_right], axis=0)  # (points, 4)
     if args.optimize_bad_views:
-        new_rot, new_tr = param_utils.optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False)
+        new_rot, new_tr, per_cam_errors = param_utils.optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False)
         new_params_path = os.path.join(calib_dir, "new_params.txt")
         cam_name_mask = np.isin(params['cam_name'], cameras['names'])
         filtered_params = params[cam_name_mask]
         param_utils.update_extrinsics(new_params_path, filtered_params, new_rot, new_tr)
     else:
-        param_utils.optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=True)
+        _, _, per_cam_errors = param_utils.optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=True)
+
+    # Write kp3d_reproj_error back to image_confidence.json
+    if per_cam_errors:
+        with open(conf_path, "r") as f:
+            conf_data = ujson.load(f)
+        for cam_name, err in per_cam_errors.items():
+            key = cam_name + ".jpg"
+            if key not in conf_data:
+                conf_data[key] = {"image_name": key}
+            conf_data[key]["kp3d_reproj_error"] = err
+        with open(conf_path, "w") as f:
+            ujson.dump(conf_data, f, indent=4)
+        print(f"Updated kp3d_reproj_error in {conf_path}")
+
+    # Build set of cameras to exclude from visualization
+    bad_cams_vis = set()
+    if args.kp3d_reproj_thresh > 0:
+        for cam_name, err in per_cam_errors.items():
+            if err >= 0 and err > args.kp3d_reproj_thresh:
+                bad_cams_vis.add(cam_name)
+                print(f"[kp3d_reproj_thresh] Excluding {cam_name} from visualization (error={err:.1f}px)")
               
     # Remove isolated false-positive detections: keep only runs of >= min_run_length consecutive frames.
     if args.min_run_length > 1:
@@ -422,9 +455,12 @@ for selected_vid_idx in selected_vid_idxs:
     os.makedirs(vis_dir, exist_ok=True)
     vis_path = os.path.join(vis_dir, 'repro.mp4')
 
+    vis_cam_names = [c for c in cur_cam_names if c not in bad_cams_vis]
+    vis_cam_indices = [i for i, c in enumerate(cur_cam_names) if c not in bad_cams_vis]
+
     im_h, im_w = int(params["height"][0]), int(params["width"][0])
-    grid_cols = int(np.ceil(np.sqrt(len(cur_cam_names) * 1.5)))
-    grid_rows = int(np.ceil(len(cur_cam_names) / grid_cols))
+    grid_cols = int(np.ceil(np.sqrt(len(vis_cam_names) * 1.5)))
+    grid_rows = int(np.ceil(len(vis_cam_names) / grid_cols))
     scale_factor = 1000 / (grid_rows * im_h)
     scaled_w = int(im_w * scale_factor)
     scaled_h = int(im_h * scale_factor)
@@ -442,7 +478,7 @@ for selected_vid_idx in selected_vid_idxs:
         kp2d_right = projectN3(kp3d_right, projs)
 
         vis_images = []
-        for cam_idx, cam in enumerate(cur_cam_names):
+        for cam_idx, cam in zip(vis_cam_indices, vis_cam_names):
             if use_parsed and cam in cam_mapper:
                 frame_path = os.path.join(parsed_dir, f"timestamp_{l_idx}", "images",
                                           f"{cam_mapper[cam]}.jpg")

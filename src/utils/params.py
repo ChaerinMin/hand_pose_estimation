@@ -169,6 +169,7 @@ def optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False):
     Returns:
         new_rot: np.ndarray (views, 3, 3)
         new_tr: np.ndarray (views, 3)
+        per_cam_errors: dict {cam_name: float}  mean kp3d reprojection error (-1.0 if unmeasurable)
     """
     assert cameras['R'].shape[0] == all_kp2d.shape[0]
     all_kp2d = all_kp2d[..., :2].astype(np.float32)
@@ -177,6 +178,7 @@ def optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False):
     new_tr = []
     init_errors = []
     final_errors = []
+    per_cam_errors = {}
     for v in range(all_kp2d.shape[0]):
         cname = cameras['names'][v]
         intrinsic = cameras['K'][v].astype(np.float32)
@@ -198,6 +200,7 @@ def optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False):
         if valid.sum() == 0:
             new_rot.append(R_init)
             new_tr.append(T_init)
+            per_cam_errors[cname] = -1.0
             print(f"No valid 2D keypoints for {cname}")
             continue
         init_projected, _ = cv2.projectPoints(
@@ -210,13 +213,14 @@ def optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False):
         if proj_valid.sum() < 4:
             new_rot.append(R_init)
             new_tr.append(T_init)
+            per_cam_errors[cname] = -1.0
             print(f"Too few valid projected keypoints for {cname} ({proj_valid.sum()})")
             continue
         init_error = np.linalg.norm(kp2d[valid][proj_valid] - init_projected[proj_valid].squeeze(), axis=-1)
         init_errors.append(init_error)
         init_err_mean = np.mean(init_error)
+        per_cam_errors[cname] = float(init_err_mean)
         print(f"Initial Error for {cname}: {init_err_mean:.4f}")
-        # init_errors += init_error * valid.sum()
         if inspect_only:
             continue
         success, rvec_opt, t_opt, _ = cv2.solvePnPRansac(
@@ -259,7 +263,7 @@ def optimize_extrinsics(cameras, all_kp2d, all_kp3d, inspect_only=False):
         print(f"Average Final Reprojection Error: {np.mean(final_errors):.4f}")
         print(f"Max Final Reprojection Error: {np.max(final_errors):.4f}")
         print(f"Std Final Reprojection Error: {np.std(final_errors):.4f}")
-    return new_rot, new_tr
+    return new_rot, new_tr, per_cam_errors
 
 def update_extrinsics(pth, params, new_rot, new_tr) -> None:
     """
