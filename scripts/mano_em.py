@@ -206,7 +206,7 @@ if args.kp3d_reproj_thresh > 0 and image_confidence is not None:
     # kp3d_reproj_error filter: completely exclude from visualization
     for k, v in image_confidence.items():
         kp3d_err = v.get("kp3d_reproj_error", -1.0)
-        if kp3d_err >= 0 and kp3d_err > args.kp3d_reproj_thresh:
+        if kp3d_err < 0 or kp3d_err > args.kp3d_reproj_thresh:
             kp3d_bad_cams.add(k.replace(".jpg", ""))
 
 if args.video_dir:

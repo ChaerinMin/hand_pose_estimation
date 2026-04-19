@@ -106,22 +106,24 @@ def prorcess_all_hamerposes(noframe_buffer, hamer_batch, hamer_out, kps_left_f, 
             bbx_left_f.write('\n')
             
     
-def process_all_vitposes_for_hamer(pred_poses, frame_buffer):
+def process_all_vitposes_for_hamer(pred_poses, frame_buffer, hand_side='both'):
     all_processed_bbox = []
     is_right = []
     for pred_pose in pred_poses:
         processed_pose = process_all_vitposes(pred_pose)
-        all_processed_bbox.append(processed_pose['left_bbox'])
-        all_processed_bbox.append(processed_pose['right_bbox'])
+        left_bbox = processed_pose['left_bbox'] if hand_side in ('left', 'both') else [0.0] * 4
+        right_bbox = processed_pose['right_bbox'] if hand_side in ('right', 'both') else [0.0] * 4
+        all_processed_bbox.append(left_bbox)
+        all_processed_bbox.append(right_bbox)
         is_right.extend([0, 1])
-    
+
     all_processed_bbox_array = np.array(all_processed_bbox)
     is_right_array = np.array(is_right)
     frame_buffer = np.array(frame_buffer)
     repeated_frame_buffer = frame_buffer[np.repeat(np.arange(len(frame_buffer)), 2)]
     return all_processed_bbox_array, is_right_array, repeated_frame_buffer
     
-def process_all_vitposes(pred_poses, kps_left_f=None, bbx_left_f=None, kps_right_f=None, bbx_right_f=None):                    
+def process_all_vitposes(pred_poses, kps_left_f=None, bbx_left_f=None, kps_right_f=None, bbx_right_f=None, hand_side='both'):
     if len(pred_poses) == 0:
         left_bbox = [0.0] * 4
         right_bbox = [0.0] * 4
@@ -129,7 +131,7 @@ def process_all_vitposes(pred_poses, kps_left_f=None, bbx_left_f=None, kps_right
         right_keyp = [0.0] * (21 * 3)
     else:
         keypoints_all = pred_poses
-        
+
         # Split into left and right hands
         left_hand_keyps = keypoints_all[:, -42:-21, :]
         right_hand_keyps = keypoints_all[:, -21:, :]
@@ -142,10 +144,10 @@ def process_all_vitposes(pred_poses, kps_left_f=None, bbx_left_f=None, kps_right
         best_left_index = np.argmax(left_valid_counts)
         best_right_index = np.argmax(right_valid_counts)
 
-        left_bbox = left_bboxes[best_left_index].tolist()
-        right_bbox = right_bboxes[best_right_index].tolist()
-        left_keyp = left_keyps[best_left_index].tolist()
-        right_keyp = right_keyps[best_right_index].tolist()
+        left_bbox = left_bboxes[best_left_index].tolist() if hand_side in ('left', 'both') else [0.0] * 4
+        right_bbox = right_bboxes[best_right_index].tolist() if hand_side in ('right', 'both') else [0.0] * 4
+        left_keyp = left_keyps[best_left_index].tolist() if hand_side in ('left', 'both') else [0.0] * (21 * 3)
+        right_keyp = right_keyps[best_right_index].tolist() if hand_side in ('right', 'both') else [0.0] * (21 * 3)
     
     # Writting
     if kps_left_f:
@@ -199,6 +201,7 @@ def main():
     parser.add_argument('--remove_side_cam', type=bool, default=True, help='Remove Side Cameras')
     parser.add_argument('--remove_bottom_cam', type=bool, default=True, help='Remove Bottom Cameras')
     parser.add_argument('--use_hamer', type=bool, default=True, help='YOLO -> ViTPose -> Hamer pipeline')
+    parser.add_argument('--hand_side', type=str, default='both', choices=['left', 'right', 'both'], help='Which hand(s) to detect; use left or right to suppress false positives from the absent hand')
     args = parser.parse_args()
     args.out_dir = os.path.join(args.out_dir, "hand")
     os.system("module load ffmpeg")
@@ -348,9 +351,13 @@ def main():
                             )
 
                         if args.use_hamer:
-                            boxes, right, repeated_frame_buffer = process_all_vitposes_for_hamer(pred_poses, frame_buffer)
+                            boxes, right, repeated_frame_buffer = process_all_vitposes_for_hamer(pred_poses, frame_buffer, args.hand_side)
                             noframe_buffer = np.array(noframe_buffer)
                             repeated_noframe_buffer = noframe_buffer[np.repeat(np.arange(len(noframe_buffer)), 2)]
+                            if args.hand_side == 'right':
+                                repeated_noframe_buffer[0::2] = 1  # suppress left
+                            elif args.hand_side == 'left':
+                                repeated_noframe_buffer[1::2] = 1  # suppress right
                             hamer_dataset = ViTDetDataset(hamer_model_cfg, repeated_frame_buffer, boxes, right, rescale_factor=2.0, device=device)
                             hamer_dataloader = torch.utils.data.DataLoader(hamer_dataset, batch_size=args.batch_size * 2, shuffle=False, num_workers=0)
                             for hamer_batch in hamer_dataloader:
@@ -360,7 +367,7 @@ def main():
                                 prorcess_all_hamerposes(repeated_noframe_buffer, hamer_batch, hamer_out, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f)                            
                         else:
                             for pred_pose in pred_poses:
-                                processed_pose = process_all_vitposes(pred_pose, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f)
+                                processed_pose = process_all_vitposes(pred_pose, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f, args.hand_side)
 
                         frame_buffer, bboxes_buffer, noframe_buffer = [], [], []
 
@@ -376,9 +383,13 @@ def main():
                     )
 
                     if args.use_hamer:
-                        boxes, right, repeated_frame_buffer = process_all_vitposes_for_hamer(pred_poses, frame_buffer)
+                        boxes, right, repeated_frame_buffer = process_all_vitposes_for_hamer(pred_poses, frame_buffer, args.hand_side)
                         noframe_buffer = np.array(noframe_buffer)
                         repeated_noframe_buffer = noframe_buffer[np.repeat(np.arange(len(noframe_buffer)), 2)]
+                        if args.hand_side == 'right':
+                            repeated_noframe_buffer[0::2] = 1  # suppress left
+                        elif args.hand_side == 'left':
+                            repeated_noframe_buffer[1::2] = 1  # suppress right
                         hamer_dataset = ViTDetDataset(hamer_model_cfg, repeated_frame_buffer, boxes, right, rescale_factor=2.0, device=device)
                         hamer_dataloader = torch.utils.data.DataLoader(hamer_dataset, batch_size=args.batch_size * 2, shuffle=False, num_workers=0)
                         for hamer_batch in hamer_dataloader:
@@ -390,7 +401,7 @@ def main():
                                 
                     else:
                         for pred_pose in pred_poses:
-                            processed_pose = process_all_vitposes(pred_pose, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f)
+                            processed_pose = process_all_vitposes(pred_pose, kps_left_f, bbx_left_f, kps_right_f, bbx_right_f, args.hand_side)
             time_list.append(time.time() - start_time)
 
             # Per-camera 2D keypoint visualization

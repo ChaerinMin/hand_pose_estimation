@@ -402,7 +402,7 @@ def main():
                     if args.confidence_thresh is not None:
                         valid = np.logical_and(valid, cam_confidence >= float(args.confidence_thresh))
                     elif args.kp3d_reproj_thresh > 0 and len(cam_confidence) > 0:
-                        kp3d_ok = np.array([(e < 0 or e <= args.kp3d_reproj_thresh) for e in cam_confidence])
+                        kp3d_ok = np.array([(e >= 0 and e <= args.kp3d_reproj_thresh) for e in cam_confidence])
                         valid = np.logical_and(valid, kp3d_ok)
 
                     if not valid.any():
@@ -477,7 +477,7 @@ def main():
         bad_cams_vis = set()
         if args.kp3d_reproj_thresh > 0:
             for cam_name, err in per_cam_errors.items():
-                if err >= 0 and err > args.kp3d_reproj_thresh:
+                if err < 0 or err > args.kp3d_reproj_thresh:
                     bad_cams_vis.add(cam_name)
                     print(f"[kp3d_reproj_thresh] Excluding {cam_name} from visualization (error={err:.1f}px)")
 
