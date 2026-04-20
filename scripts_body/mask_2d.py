@@ -80,6 +80,10 @@ def main():
         "--collage_only", action="store_true",
         help="If true, only create the collage image from existing per-camera masks"
     )
+    parser.add_argument(
+        "--kp3d_reproj_thresh", type=float, default=50.0,
+        help="Exclude cameras whose mean kp3d reprojection error exceeds this threshold (px). Set to 0 to disable."
+    )
     args = parser.parse_args()
 
     # paths
@@ -118,6 +122,22 @@ def main():
     for cam in cams_to_remove:
         if cam in cam_names:
             cam_names.remove(cam)
+
+    # bad cameras (kp3d reprojection error)
+    kp3d_bad_cams = set()
+    if args.kp3d_reproj_thresh > 0:
+        conf_path = os.path.join(
+            args.root_dir, args.seq_path, args.multisequence, "calib", "image_confidence.json"
+        )
+        if os.path.exists(conf_path):
+            with open(conf_path, "r") as f:
+                image_confidence = ujson.load(f)
+            for k, v in image_confidence.items():
+                err = v.get("kp3d_reproj_error", -1.0)
+                if err < 0 or err > args.kp3d_reproj_thresh:
+                    kp3d_bad_cams.add(k.replace(".jpg", ""))
+            if kp3d_bad_cams:
+                print(f"[mask_2d] Skipping bad cameras: {sorted(kp3d_bad_cams)}")
 
     # which video(s) to process
     if args.ith == -1:
@@ -195,6 +215,8 @@ def main():
             )
 
             camname = input_video_path.split('/')[-2]
+            if camname in kp3d_bad_cams:
+                continue
             if camname not in cam_mapper:
                 continue
 
