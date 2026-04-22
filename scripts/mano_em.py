@@ -752,7 +752,7 @@ for selected_vid_idx in selected_vid_idxs:
                             faces = body_model_left.faces
                         image_vis, render_results = vis_smpl(
                             args, vertices=vertices, faces=faces, images=vis_images,
-                            nf=nf, cameras=vis_cameras, add_back=True, out_dir="",
+                            nf=chosen_f, cameras=vis_cameras, add_back=True, out_dir="",
                             confident=confident, save_frames=False
                         )
                         # if args.vis_smpl:
@@ -788,7 +788,7 @@ for selected_vid_idx in selected_vid_idxs:
                             keypoints = keypoints3d_left[abs_idx]
                         kpts_repro = projectN3(keypoints, vis_projs)
                         kpts_repro[:, :, 2] = 0.5
-                        image_vis = vis_repro(args, vis_images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_3d_path, cameras=vis_cameras, confident=confident)
+                        image_vis = vis_repro(args, vis_images, kpts_repro, config=vis_config, nf=chosen_f, mode='repro_smpl', outdir=outhand_3d_path, cameras=vis_cameras, confident=confident)
                         # image_vis = cv2.addWeighted(image_vis, 0.7, image_kps, 0.3, 0)
                         if abs_idx == 0:
                             outhand_3d = create_video_writer(outhand_3d_path+".mp4", (image_vis.shape[1], image_vis.shape[0]), fps=30)
@@ -809,7 +809,7 @@ for selected_vid_idx in selected_vid_idxs:
                         joints = joints_left
                     joints_repro = projectN3(joints, vis_projs)
                     joints_repro[:, :, 2] = 0.5
-                    image_vis = vis_repro(args, render_results, joints_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outjoint_3d_path, cameras=vis_cameras, confident=confident)
+                    image_vis = vis_repro(args, render_results, joints_repro, config=vis_config, nf=chosen_f, mode='repro_smpl', outdir=outjoint_3d_path, cameras=vis_cameras, confident=confident)
                     if abs_idx == 0:
                         outjoint_3d = create_video_writer(outjoint_3d_path+".mp4", (image_vis.shape[1], image_vis.shape[0]), fps=30)
                     outjoint_3d.write(image_vis)
@@ -823,7 +823,7 @@ for selected_vid_idx in selected_vid_idxs:
                         else:
                             keypoints2d = all_keypoints2d_left[abs_idx]
                         kpts_repro = keypoints2d[vis_img_indices]
-                        image_vis = vis_repro(args, vis_images, kpts_repro, config=vis_config, nf=nf, mode='repro_smpl', outdir=outhand_2d_path, cameras=vis_cameras, confident=confident)
+                        image_vis = vis_repro(args, vis_images, kpts_repro, config=vis_config, nf=chosen_f, mode='repro_smpl', outdir=outhand_2d_path, cameras=vis_cameras, confident=confident)
                         if abs_idx == 0:
                             outhand_2d = create_video_writer(outhand_2d_path+".mp4", (image_vis.shape[1], image_vis.shape[0]), fps=30)
                         outhand_2d.write(image_vis)

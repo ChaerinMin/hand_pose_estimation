@@ -773,7 +773,7 @@ for selected_vid_idx in selected_vid_idxs:
 
                 image_vis, render_results = vis_smpl(
                     args, vertices=vertices_scaled, faces=body_model.faces,
-                    images=images, nf=nf, cameras=cameras, add_back=True,
+                    images=images, nf=chosen_f, cameras=cameras, add_back=True,
                     out_dir="", confident=confident, save_frames=False
                 )
                 # if abs_idx == 0:
@@ -798,7 +798,7 @@ for selected_vid_idx in selected_vid_idxs:
                     kpts_repro[:, :, 2] = 0.5  # Set all confidences to 0.5 for vis
                     image_vis = vis_repro(
                         args, images, kpts_repro, config=dataset_config,
-                        nf=nf, mode='repro_smpl', outdir=out_3d_path,
+                        nf=chosen_f, mode='repro_smpl', outdir=out_3d_path,
                         cameras=cameras, confident=confident
                     )
                     if abs_idx == 0:
@@ -819,13 +819,13 @@ for selected_vid_idx in selected_vid_idxs:
                 if args.vis_smpl:
                     image_vis = vis_repro(
                         args, render_results, joints_repro, config=dataset_config,
-                        nf=nf, mode='repro_smpl', outdir=out_joint_path,
+                        nf=chosen_f, mode='repro_smpl', outdir=out_joint_path,
                         cameras=cameras, confident=confident
                     )
                 else:
                     image_vis = vis_repro(
                         args, images, joints_repro, config=dataset_config,
-                        nf=nf, mode='repro_smpl', outdir=out_joint_path,
+                        nf=chosen_f, mode='repro_smpl', outdir=out_joint_path,
                         cameras=cameras, confident=confident
                     )
 
@@ -841,7 +841,7 @@ for selected_vid_idx in selected_vid_idxs:
                     kpts_repro = all_keypoints2d[abs_idx]
                     image_vis = vis_repro(
                         args, images, kpts_repro, config=vis_config_2d,
-                        nf=nf, mode='repro_smpl', outdir=out_2d_path,
+                        nf=chosen_f, mode='repro_smpl', outdir=out_2d_path,
                         cameras=cameras, confident=confident
                     )
                     if abs_idx == 0:
