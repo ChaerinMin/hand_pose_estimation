@@ -140,6 +140,9 @@ def parse_args():
     parser.add_argument('--fix_hands', action=argparse.BooleanOptionalAction, default=True,
                         help='Zero out wrist + finger poses so hands follow the arm rigidly '
                              '(SMPL-X template hand). --no-fix_hands keeps the fitted hand pose.')
+    parser.add_argument('--hide_hand_mesh', action=argparse.BooleanOptionalAction, default=False,
+                        help='Drop faces skinned to wrist/finger joints so the rendered '
+                             'mesh ends at the forearm (no hand geometry).')
     return parser.parse_args()
 
 
@@ -288,8 +291,27 @@ def main():
     # Vis config (body25 only - no hand)
     body25_cfg = get_body25_config()
 
-    # Output directory
-    out_dir = os.path.join(output_path, 'vis', args.out_name,
+    # Optional: drop faces belonging to the hand so only the arm mesh is rendered.
+    # SMPL-X kintree -> joints 20 (L wrist), 21 (R wrist) and 25..54 (finger bones)
+    # are the wrist + hand chain. A vertex whose dominant skinning weight falls on
+    # any of these is considered a hand vertex, and any face containing a hand
+    # vertex is dropped.
+    render_faces = body_model.faces
+    if args.hide_hand_mesh:
+        W = body_model.weights.detach().cpu().numpy()  # (V, 55)
+        dominant = W.argmax(axis=1)
+        hand_joint_ids = set([20, 21]) | set(range(25, 55))
+        hand_vert_mask = np.isin(dominant, list(hand_joint_ids))
+        faces_np = np.asarray(body_model.faces)
+        face_touches_hand = hand_vert_mask[faces_np].any(axis=1)
+        render_faces = faces_np[~face_touches_hand].astype(body_model.faces.dtype)
+        print(f"Hiding hand mesh: kept {render_faces.shape[0]}/{faces_np.shape[0]} faces "
+              f"({hand_vert_mask.sum()}/{len(hand_vert_mask)} vertices classified as hand)")
+
+    # Output directory (add suffix when hiding the hand mesh so we don't overwrite
+    # the version with hands).
+    out_name = args.out_name + ('_nohand' if args.hide_hand_mesh else '')
+    out_dir = os.path.join(output_path, 'vis', out_name,
                            str(selected_vid_idx).zfill(3))
     os.makedirs(out_dir, exist_ok=True)
     out_mp4 = out_dir + ".mp4"
@@ -341,7 +363,7 @@ def main():
             vertices = body_model(return_verts=True, return_tensor=False, **param_frame)
             vertices = (vertices - root[abs_idx:abs_idx + 1]) * final_scale + root[abs_idx:abs_idx + 1]
             vertices = vertices.squeeze(0)
-            rendered = vis_smpl_no_border(vertices, body_model.faces, vis_images,
+            rendered = vis_smpl_no_border(vertices, render_faces, vis_images,
                                            vis_cameras, renderer, add_back=True)
             base_for_joints = rendered
         else:

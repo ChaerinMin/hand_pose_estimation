@@ -4,7 +4,15 @@
       "Read(//oscar/data/ssrinath/users/cmin5/non-rigid-hoi/**)",
       "Read(//oscar/data/ssrinath/public/brics-mini/2026-04-03/multisequence000001/outputs/hand/intermediate/keypoints_3d/**)",
       "Read(//oscar/data/ssrinath/public/brics-mini/2026-04-03/multisequence000001/outputs/hand/**)",
-      "Bash(conda run -n zeronvs --no-capture-output python3 -c ':*)"
+      "Bash(conda run -n zeronvs --no-capture-output python3 -c ':*)",
+      "Read(//oscar/data/ssrinath/public/brics-studio/2025-04-05/multisequence000001/outputs/body/**)",
+      "Bash(awk 'NR>=100 && NR<=300' /oscar/data/ssrinath/users/cmin5/non-rigid-hoi/submit_run.sh)",
+      "Bash(awk -F',' 'NR==1 || NR==535' /oscar/data/ssrinath/users/cmin5/non-rigid-hoi/submit_configs.csv)",
+      "Read(//oscar/data/ssrinath/public/brics-studio/2025-04-05/multisequence000001/parsed/**)",
+      "Read(//oscar/data/ssrinath/public/brics-studio/2025-04-05/multisequence000001/calib/stage2/sparse/0/**)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('scripts_body/vis_selected_views.py'\\).read\\(\\)\\); print\\('ok'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('scripts_body/bake_smplx_vertices.py'\\).read\\(\\)\\); print\\('ok'\\)\")"
     ]
   }
 }
