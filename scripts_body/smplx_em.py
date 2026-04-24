@@ -36,7 +36,12 @@ from src.utils.cameras import (get_projections, map_camera_names,
                                removed_cameras)
 from src.utils.easymocap_utils import (load_model, projectN3, vis_repro,
                                        vis_smpl)
-from src.utils.filter import apply_one_euro_filter_2d, apply_one_euro_filter_3d
+from src.utils.filter import (apply_one_euro_filter_2d, apply_one_euro_filter_3d,
+                               apply_savgol_filter_2d, apply_savgol_filter_3d,
+                               apply_savgol_filter_rotvec,
+                               canonicalize_rotvec_sequence,
+                               reject_outliers_median_2d, reject_outliers_median_3d,
+                               reject_rotation_outliers)
 from src.utils.mask_optimize import refine_shape_with_mask
 from src.utils.parser import add_common_args
 from src.utils.reader_v2 import Reader
@@ -44,6 +49,8 @@ from src.utils.video_handler import convert_video_ffmpeg, create_video_writer
 from easymocap.dataset import CONFIG
 from easymocap.mytools import Timer
 from easymocap.pipeline import smpl_from_keypoints3d, smpl_from_keypoints3d2d
+from easymocap.pyfitting import optimizeShape, optimizePose3D
+from easymocap.pipeline.config import Config
 from easymocap.smplmodel import select_nf
 from easymocap.smplmodel.body_model import SMPLlayer
 
@@ -300,6 +307,12 @@ parser.add_argument(
 )
 parser.add_argument('--model', type=str, default='smplx', choices=['smpl', 'smplh', 'smplx'])
 parser.add_argument("--optimize_bad_views", action="store_true", help="Whether to optimize extrinsics of bad views")
+parser.add_argument("--outlier_rejection", action="store_true", default=False, help="Reject outliers before smoothing (requires --to_smooth)")
+parser.add_argument("--outlier_window", type=int, default=5, help="Sliding window size for outlier rejection")
+parser.add_argument("--outlier_threshold", type=float, default=0.5, help="MAD multiplier threshold for outlier rejection")
+parser.add_argument("--savgol", action=argparse.BooleanOptionalAction, default=True, help="Use zero-phase Savitzky-Golay filter instead of One Euro filter (requires --to_smooth)")
+parser.add_argument("--savgol_window", type=int, default=11, help="Window length for Savitzky-Golay filter (must be odd)")
+parser.add_argument("--savgol_polyorder", type=int, default=3, help="Polynomial order for Savitzky-Golay filter")
 parser.add_argument('--gender', type=str, default='neutral', choices=['neutral', 'male', 'female'])
 parser.add_argument('--save_origin', action='store_true')
 parser.add_argument('--verbose', action='store_true')
@@ -318,6 +331,7 @@ output.add_argument('--vis_smpl', action='store_true')
 output.add_argument('--save_frame', action='store_true')
 output.add_argument('--save_mesh', action='store_true')
 output.add_argument("--confidence_thresh", type=float, default=None, help="Camera confidence")
+output.add_argument("--kp3d_reproj_thresh", type=float, default=50.0, help="Exclude cameras whose mean kp3d reprojection error exceeds this threshold (px). Set to 0 to disable.")
 output.add_argument("--refine_shape_with_mask", action="store_true", help="Refine SMPL-X shape parameters using body masks from mask_2d")
 output.add_argument("--subject_name", type=str, default=None, help="If refine_shape_with_mask, save betas with subject_name. If not, load betas with subject_name.")
 args = parser.parse_args()
@@ -390,19 +404,29 @@ else:
     selected_vid_idxs = [args.ith]
 
 # Camera confidence
-if args.confidence_thresh is not None:
-    # conf_dir = args.out_dir[:args.out_dir.index("/stage")]
-    # conf_path = os.path.join(conf_dir, "image_confidence.json")
-    conf_path = os.path.join(
-        args.root_dir, args.seq_path, args.multisequence, "calib", "image_confidence.json"
-    )
+conf_path = os.path.join(
+    args.root_dir, args.seq_path, args.multisequence, "calib", "image_confidence.json"
+)
+image_confidence = None
+confident = None
+kp3d_bad_cams = set()  # cameras to completely exclude from visualization
+
+if args.confidence_thresh is not None or args.kp3d_reproj_thresh > 0:
     with open(conf_path, "r") as f:
         image_confidence = ujson.load(f)
+
+if args.confidence_thresh is not None and image_confidence is not None:
+    # num_visible_3D_points filter: controls red border in visualization
     confident = {}
     for k, v in image_confidence.items():
         confident[k.replace(".jpg", "")] = v["num_visible_3D_points"] >= float(args.confidence_thresh)
-else:
-    confident = None
+
+if args.kp3d_reproj_thresh > 0 and image_confidence is not None:
+    # kp3d_reproj_error filter: completely exclude from visualization
+    for k, v in image_confidence.items():
+        kp3d_err = v.get("kp3d_reproj_error", -1.0)
+        if kp3d_err < 0 or kp3d_err > args.kp3d_reproj_thresh:
+            kp3d_bad_cams.add(k.replace(".jpg", ""))
 
 # Load SMPL-X model
 print(f'Loading {args.model} model ({args.gender})...')
@@ -472,7 +496,6 @@ for selected_vid_idx in selected_vid_idxs:
         cams_to_remove=cams_to_remove,
         ith=selected_vid_idx,
         anchor_camera=anchor_camera_by_length if args.ith==-1 else args.anchor_camera,
-        match_by_timestamp=(args.setting != "brics-mobile")
     )
 
     # Keypoint paths
@@ -510,6 +533,22 @@ for selected_vid_idx in selected_vid_idxs:
     intrs, projs, dist_intrs, dists, cameras = get_projections(
         args, params, cur_cam_names, cam_mapper, easymocap_format=True
     )
+
+    # Build visualization camera filter (exclude cameras that fail kp3d_reproj_thresh)
+    cam_mapper_list = [c for c in cur_cam_names if c in cam_mapper]
+    bad_cams_vis = {c for c in cam_mapper_list if c in kp3d_bad_cams}
+    vis_img_indices = [i for i, c in enumerate(cam_mapper_list) if c not in bad_cams_vis]
+    vis_projs = [projs[i] for i in vis_img_indices]
+    vis_cameras = {}
+    for k, v in cameras.items():
+        if k == 'names':
+            vis_cameras[k] = [v[i] for i in vis_img_indices]
+        elif isinstance(v, np.ndarray) and v.ndim > 0 and len(v) == len(cam_mapper_list):
+            vis_cameras[k] = v[vis_img_indices]
+        else:
+            vis_cameras[k] = v
+    if bad_cams_vis:
+        print(f"[vis filter] Excluding from visualization: {sorted(bad_cams_vis)}")
 
     # Load body masks for mask-based shape refinement
     body_masks = None
@@ -622,6 +661,69 @@ for selected_vid_idx in selected_vid_idxs:
         'reg_poses': 5e-5, 'smooth_body': 1e1, 'smooth_poses': 5.0,
     }
 
+    CHUNK_SIZE = 300
+    SHAPE_SAMPLE = 100
+
+    def optimize_chunk(body_model, chunk_kp3d, shapes, weight_pose):
+        """Fixed shape; all stages start without smoothness to avoid local minima at zero initialization."""
+        nFrames = chunk_kp3d.shape[0]
+        params = body_model.init_params(nFrames=nFrames)
+        params['shapes'] = shapes.copy()
+        cfg = Config(args)
+        cfg.device = body_model.device
+        cfg.model_type = body_model.model_type
+        weight_no_smooth = {k: v for k, v in weight_pose.items()}
+        weight_no_smooth['smooth_body'] = 0.0
+        weight_no_smooth['smooth_poses'] = 0.0
+        # Stage 1: global RT, no smoothness
+        cfg.OPT_R = True
+        cfg.OPT_T = True
+        cfg.GLOBAL_ONLY = True
+        with Timer('Optimize global RT'):
+            params = optimizePose3D(body_model, params, chunk_kp3d, weight=weight_no_smooth, cfg=cfg)
+        cfg.GLOBAL_ONLY = False
+        # Stage 2: pose, no smoothness (avoids poses=0 local minimum)
+        cfg.OPT_POSE = True
+        with Timer(f'Optimize 3D Pose/{nFrames} frames (no smooth)'):
+            params = optimizePose3D(body_model, params, chunk_kp3d, weight=weight_no_smooth, cfg=cfg)
+        # Stage 3: refinement with full smoothness weights
+        with Timer(f'Optimize 3D Pose/{nFrames} frames (smooth)'):
+            params = optimizePose3D(body_model, params, chunk_kp3d, weight=weight_pose, cfg=cfg)
+        return params
+
+    def smpl_from_keypoints3d_chunked(body_model, kp3ds, weight_shape, weight_pose, init_shapes):
+        nFrames = kp3ds.shape[0]
+        if nFrames <= CHUNK_SIZE:
+            return smpl_from_keypoints3d(body_model, kp3ds,
+                config=dataset_config, args=args,
+                weight_shape=weight_shape, weight_pose=weight_pose,
+                init_shapes=init_shapes)
+        print(f"  [chunked] {nFrames} frames > {CHUNK_SIZE}, splitting into chunks")
+        if init_shapes is None:
+            sample_idx = np.linspace(0, nFrames - 1, min(SHAPE_SAMPLE, nFrames), dtype=int)
+            kp3ds_sample = kp3ds[sample_idx]
+            params_init = body_model.init_params(nFrames=1)
+            params_shape = optimizeShape(body_model, params_init, kp3ds_sample,
+                weight_loss=weight_shape, kintree=dataset_config['kintree'])
+            shapes = params_shape['shapes']
+            print(f"  [chunked] shape estimated from {len(sample_idx)} frames")
+        else:
+            shapes = init_shapes
+        chunk_params_list = []
+        for chunk_start in range(0, nFrames, CHUNK_SIZE):
+            chunk_end = min(chunk_start + CHUNK_SIZE, nFrames)
+            chunk_kp3d = kp3ds[chunk_start:chunk_end]
+            print(f"  [chunked] frames {chunk_start}-{chunk_end-1}")
+            chunk_params = optimize_chunk(body_model, chunk_kp3d, shapes, weight_pose)
+            chunk_params_list.append(chunk_params)
+        # Concatenate per-frame varying keys; keep shapes as single copy
+        out = {'shapes': shapes}
+        for key in chunk_params_list[0].keys():
+            if key == 'shapes':
+                continue
+            out[key] = np.concatenate([cp[key] for cp in chunk_params_list], axis=0)
+        return out
+
     # Choose between 3D-only or 3D+2D fitting
     fit_3d2d = False  # Can be made an argument if needed
 
@@ -635,9 +737,8 @@ for selected_vid_idx in selected_vid_idxs:
             weight_pose=weight_pose
         )
     else:
-        params_body = smpl_from_keypoints3d(
+        params_body = smpl_from_keypoints3d_chunked(
             body_model, keypoints3d_scaled,
-            config=dataset_config, args=args,
             weight_shape={'s3d': 1e5, 'reg_shapes': 1e2},
             weight_pose=weight_pose,
             init_shapes=init_shapes
@@ -694,9 +795,37 @@ for selected_vid_idx in selected_vid_idxs:
     # Smooth SMPL-X parameters if requested
     if args.to_smooth and len(params_body['Rh']) > 3:
         print('Smoothing SMPL-X parameters...')
-        params_body['Rh'] = apply_one_euro_filter_2d(params_body['Rh'], mincutoff=0.5, beta=0.0, dcutoff=1.0)
-        params_body['Th'] = apply_one_euro_filter_2d(params_body['Th'], mincutoff=0.5, beta=0.0, dcutoff=1.0)
-        params_body['poses'] = apply_one_euro_filter_2d(params_body['poses'], mincutoff=0.5, beta=0.0, dcutoff=1.0)
+        def smooth_params_per_segment(params, frame_indices):
+            """Apply smoothing within each contiguous temporal segment independently.
+            Prevents savgol from blending across gaps where the subject was absent.
+            Rh (global rotation) is canonicalized in quaternion space first to remove
+            axis-angle π-singularity flip artifacts before smoothing."""
+            frames = np.array(frame_indices)
+            diffs = np.diff(frames)
+            boundaries = np.where(diffs > 1)[0] + 1
+            seg_starts = np.concatenate([[0], boundaries])
+            seg_ends = np.concatenate([boundaries, [len(frames)]])
+            for start, end in zip(seg_starts, seg_ends):
+                for key in ('Rh', 'Th', 'poses'):
+                    seg = params[key][start:end]
+                    if len(seg) < 2:
+                        continue
+                    if key == 'Rh':
+                        seg = canonicalize_rotvec_sequence(seg)
+                        seg = reject_rotation_outliers(seg, window=args.outlier_window, threshold=0.5)
+                        if args.savgol:
+                            seg = apply_savgol_filter_rotvec(seg, window=args.savgol_window, polyorder=args.savgol_polyorder)
+                        else:
+                            seg = apply_one_euro_filter_2d(seg, mincutoff=0.5, beta=0.0, dcutoff=1.0)
+                    else:
+                        if args.outlier_rejection:
+                            seg = reject_outliers_median_2d(seg, window=args.outlier_window, threshold=args.outlier_threshold)
+                        if args.savgol:
+                            seg = apply_savgol_filter_2d(seg, window=args.savgol_window, polyorder=args.savgol_polyorder)
+                        else:
+                            seg = apply_one_euro_filter_2d(seg, mincutoff=0.5, beta=0.0, dcutoff=1.0)
+                    params[key][start:end] = seg
+        smooth_params_per_segment(params_body, chosen_frames)
 
     # Save parameters
     params_list = {}
@@ -756,6 +885,7 @@ for selected_vid_idx in selected_vid_idxs:
                         image = param_utils.undistort_image(intrs[c_idx], dist_intrs[c_idx], dists[c_idx], image)
                     c_idx += 1
                     images.append(image)
+            vis_images = [images[i] for i in vis_img_indices]
 
             param_frame = select_nf(params_body, nf)
 
@@ -773,7 +903,7 @@ for selected_vid_idx in selected_vid_idxs:
 
                 image_vis, render_results = vis_smpl(
                     args, vertices=vertices_scaled, faces=body_model.faces,
-                    images=images, nf=chosen_f, cameras=cameras, add_back=True,
+                    images=vis_images, nf=chosen_f, cameras=vis_cameras, add_back=True,
                     out_dir="", confident=confident, save_frames=False
                 )
                 # if abs_idx == 0:
@@ -794,12 +924,12 @@ for selected_vid_idx in selected_vid_idxs:
                 # Visualize 3D keypoint reprojection (Body25+Hands 67 keypoints)
                 if args.vis_3d_repro:
                     # Use converted Body25+hands keypoints for 3D visualization
-                    kpts_repro = projectN3(keypoints3d_selected[abs_idx], projs)
+                    kpts_repro = projectN3(keypoints3d_selected[abs_idx], vis_projs)
                     kpts_repro[:, :, 2] = 0.5  # Set all confidences to 0.5 for vis
                     image_vis = vis_repro(
-                        args, images, kpts_repro, config=dataset_config,
+                        args, vis_images, kpts_repro, config=dataset_config,
                         nf=chosen_f, mode='repro_smpl', outdir=out_3d_path,
-                        cameras=cameras, confident=confident
+                        cameras=vis_cameras, confident=confident
                     )
                     if abs_idx == 0:
                         out_3d = create_video_writer(
@@ -813,20 +943,20 @@ for selected_vid_idx in selected_vid_idxs:
                 joints = body_model(return_verts=False, return_tensor=False, **param_frame)
                 joints_scaled = (joints - root[abs_idx:abs_idx+1]) * final_scale + root[abs_idx:abs_idx+1]
                 joints_scaled = joints_scaled.squeeze(0)
-                joints_repro = projectN3(joints_scaled, projs)
+                joints_repro = projectN3(joints_scaled, vis_projs)
                 joints_repro[:, :, 2] = 0.5
 
                 if args.vis_smpl:
                     image_vis = vis_repro(
                         args, render_results, joints_repro, config=dataset_config,
                         nf=chosen_f, mode='repro_smpl', outdir=out_joint_path,
-                        cameras=cameras, confident=confident
+                        cameras=vis_cameras, confident=confident
                     )
                 else:
                     image_vis = vis_repro(
-                        args, images, joints_repro, config=dataset_config,
+                        args, vis_images, joints_repro, config=dataset_config,
                         nf=chosen_f, mode='repro_smpl', outdir=out_joint_path,
-                        cameras=cameras, confident=confident
+                        cameras=vis_cameras, confident=confident
                     )
 
                 if abs_idx == 0:
@@ -838,11 +968,11 @@ for selected_vid_idx in selected_vid_idxs:
 
                 # Visualize 2D keypoints (original COCO-WholeBody 133 keypoints)
                 if args.vis_2d_repro:
-                    kpts_repro = all_keypoints2d[abs_idx]
+                    kpts_repro = all_keypoints2d[abs_idx][vis_img_indices]
                     image_vis = vis_repro(
-                        args, images, kpts_repro, config=vis_config_2d,
+                        args, vis_images, kpts_repro, config=vis_config_2d,
                         nf=chosen_f, mode='repro_smpl', outdir=out_2d_path,
-                        cameras=cameras, confident=confident
+                        cameras=vis_cameras, confident=confident
                     )
                     if abs_idx == 0:
                         out_2d = create_video_writer(

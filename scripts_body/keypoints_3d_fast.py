@@ -35,7 +35,7 @@ import src.utils.params as param_utils
 from src.utils.parser import add_common_args
 from src.utils.cameras import removed_cameras, map_camera_names, get_projections
 from src.triangulate import triangulate_joints, ransac_processor
-from src.utils.filter import apply_one_euro_filter_3d
+from src.utils.filter import apply_one_euro_filter_3d, apply_savgol_filter_3d, reject_outliers_median_3d
 from src.utils.video_handler import create_video_writer, convert_video_ffmpeg
 
 sys.path.append("./EasyMocap")
@@ -183,6 +183,12 @@ def main():
     parser.add_argument("--confidence_thresh", type=float, default=None, help="Camera confidence threshold")
     parser.add_argument("--kp3d_reproj_thresh", type=float, default=50.0, help="Exclude cameras whose mean kp3d reprojection error exceeds this threshold (px). Set to 0 to disable.")
     parser.add_argument("--optimize_bad_views", action="store_true", help="Optimize extrinsics of bad views")
+    parser.add_argument("--outlier_rejection", action="store_true", default=False, help="Reject outliers before smoothing (requires --to_smooth)")
+    parser.add_argument("--outlier_window", type=int, default=5, help="Sliding window size for outlier rejection")
+    parser.add_argument("--outlier_threshold", type=float, default=0.5, help="MAD multiplier threshold for outlier rejection")
+    parser.add_argument("--savgol", action=argparse.BooleanOptionalAction, default=True, help="Use zero-phase Savitzky-Golay filter instead of One Euro filter (requires --to_smooth)")
+    parser.add_argument("--savgol_window", type=int, default=11, help="Window length for Savitzky-Golay filter (must be odd)")
+    parser.add_argument("--savgol_polyorder", type=int, default=3, help="Polynomial order for Savitzky-Golay filter")
     # parser.add_argument("--vis_repro", action="store_true", help="Visualize reprojected 3D keypoints")
     args = parser.parse_args()
 
@@ -275,7 +281,6 @@ def main():
             args.input_type, video_dir, cam_names=cam_names,
             cams_to_remove=cams_to_remove, ith=selected_vid_idx,
             anchor_camera=anchor_camera_by_length if args.ith == -1 else args.anchor_camera,
-            match_by_timestamp=(args.setting != "brics-mobile")
         )
 
         extra_cams_to_remove = reader.to_delete
@@ -438,10 +443,14 @@ def main():
             print('Smoothing 3D keypoints...')
             valid_frames = all_keypoints3d[:, :, 3].sum(axis=1) > 0
             if valid_frames.sum() > 2:
-                all_keypoints3d[valid_frames] = apply_one_euro_filter_3d(
-                    all_keypoints3d[valid_frames],
-                    mincutoff=0.5, beta=0.0, dcutoff=1.0
-                )
+                data = all_keypoints3d[valid_frames, :, :3].copy()
+                if args.outlier_rejection:
+                    data = reject_outliers_median_3d(data, window=args.outlier_window, threshold=args.outlier_threshold)
+                if args.savgol:
+                    data = apply_savgol_filter_3d(data, window=args.savgol_window, polyorder=args.savgol_polyorder)
+                else:
+                    data = apply_one_euro_filter_3d(data, mincutoff=0.5, beta=0.0, dcutoff=1.0)
+                all_keypoints3d[valid_frames, :, :3] = data
                 # Rewrite smoothed keypoints
                 with open(keypt_file, "w") as f3d:
                     for kp3d in all_keypoints3d:
