@@ -316,14 +316,35 @@ def main():
             # print(input_video_path)
             # print(intrs[v_idx], dist_intrs[v_idx], dists[v_idx])
             im_names, orig_imgs, im_h, im_w = frame_preprocess(input_video_path, use_parsed, args, intrs[v_idx], dist_intrs[v_idx], dists[v_idx])
-            
+
             video_name = input_video_path.split('/')[-1].split('.')[0]
-            
+
             output_kps_left_file_path = f"{output_kps_left_path}/{video_name}.jsonl"
             output_bbx_left_file_path = f"{output_bbx_left_path}/{video_name}.jsonl"
             output_kps_right_file_path = f"{output_kps_right_path}/{video_name}.jsonl"
-            output_bbx_right_file_path = f"{output_bbx_right_path}/{video_name}.jsonl"                
-            
+            output_bbx_right_file_path = f"{output_bbx_right_path}/{video_name}.jsonl"
+
+            if im_h is None:
+                # Camera has no parsed image in any timestamp. Write placeholder
+                # jsonls matching the noframe pattern (x=0, y=0, conf=1 for kps;
+                # zero box) so downstream triangulation alignment stays intact
+                # and the invalidity filter excludes this camera.
+                print(f"Warning: no parsed frames for {video_name}, writing placeholder jsonl")
+                placeholder_kps = [0.0, 0.0, 1.0] * 21
+                placeholder_box = [0.0, 0.0, 0.0, 0.0]
+                with open(output_kps_left_file_path, 'w') as kps_left_f, \
+                     open(output_bbx_left_file_path, 'w') as bbx_left_f, \
+                     open(output_kps_right_file_path, 'w') as kps_right_f, \
+                     open(output_bbx_right_file_path, 'w') as bbx_right_f:
+                    for _ in im_names:
+                        for f in (kps_left_f, kps_right_f):
+                            ujson.dump(placeholder_kps, f)
+                            f.write('\n')
+                        for f in (bbx_left_f, bbx_right_f):
+                            ujson.dump(placeholder_box, f)
+                            f.write('\n')
+                continue
+
             start_time = time.time()
             if use_parsed:
                 assert args.use_hamer, "Not implemented"

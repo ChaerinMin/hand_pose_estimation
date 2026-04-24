@@ -52,12 +52,22 @@ def frame_preprocess(path, use_parsed, args, intr=None, dist_intr=None, dist=Non
             orig_imgs.append(frame)
             im_names.append(f'{frame_num:08d}' + '.jpg')
             frame_num += 1
+    H, W = None, None
     for frame in orig_imgs:
         if frame is not None:
             H, W, _ = frame.shape
             break
     if not use_parsed:
         stream.release()
+    if H is None:
+        # No valid frame in sampled range (e.g., this camera has no parsed image
+        # for any timestamp in [0, datalen)). Fall back to a broader scan.
+        try:
+            _, H, W, _ = load_first_frame(path, use_parsed, args, intr, dist_intr, dist)
+        except (ValueError, FileNotFoundError):
+            # Camera has no parsed image in any timestamp. Return sentinel so
+            # callers can write a placeholder jsonl and skip processing.
+            H, W = None, None
 
     return im_names, orig_imgs, H, W
 

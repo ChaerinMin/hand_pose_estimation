@@ -388,6 +388,21 @@ def extract_keypoints(args, params, cam_names, cam_mapper,
 
         video_name = input_video_path.split('/')[-1].split('.')[0]
         output_kps_file = f"{output_kps_path}/{video_name}.jsonl"
+
+        if im_h is None:
+            # Camera has no parsed image in any timestamp. Write a placeholder
+            # jsonl matching the "noframe" pattern (x=0, y=0, conf=1) so downstream
+            # kp3d/smplx_em alignment stays intact and the invalidity filter
+            # excludes this camera from triangulation/reprojection.
+            print(f"Warning: no parsed frames for {video_name}, writing placeholder jsonl")
+            placeholder = np.zeros((NUM_KEYPOINTS, 3), dtype=np.float32)
+            placeholder[:, 2] = 1.0
+            with open(output_kps_file, 'w') as kps_f:
+                for _ in im_names:
+                    ujson.dump(placeholder.reshape(-1).tolist(), kps_f)
+                    kps_f.write('\n')
+            continue
+
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         vis_path = os.path.join(args.out_dir, 'vis', 'keypoints_2d', f'{selected_vid_idx:03d}', f"{video_name}.mp4")
         os.makedirs(os.path.dirname(vis_path), exist_ok=True)
@@ -523,7 +538,7 @@ def main():
     parser = argparse.ArgumentParser(description='Full-Body 2D Keypoint Detection (COCO-WholeBody 133)')
     add_common_args(parser)
     parser.add_argument("--use_optim_params", action="store_true")
-    parser.add_argument('--batch_size', type=int, default=1024, help='Batch size for YOLO + ViTPose')
+    parser.add_argument('--batch_size', type=int, default=64, help='Batch size for YOLO + ViTPose')
     parser.add_argument('--box_score_threshold', type=float, default=0.2, help='Confidence threshold for person detection')
     parser.add_argument('--yolo_model', type=str, default='yolov9c.pt', help='YOLO model for person detection')
     parser.add_argument('--no_refine', action='store_true', help='Skip two-stage crop refinement for face/hands')
@@ -604,7 +619,6 @@ def main():
             args.input_type, video_dir, cam_names=cam_names,
             cams_to_remove=cams_to_remove, ith=selected_vid_idx,
             anchor_camera=anchor_camera_by_length if args.ith == -1 else args.anchor_camera,
-            match_by_timestamp=(args.setting != "brics-mobile")
         )
         if reader.frame_count <= 0:
             continue
