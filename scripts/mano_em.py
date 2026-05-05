@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import shutil
 import sys
 import cv2
 
@@ -838,11 +839,17 @@ for selected_vid_idx in selected_vid_idxs:
             if args.vis_2d_repro:
                 outhand_2d.release()
                 convert_video_ffmpeg(outhand_2d_path+".mp4")
+                if os.path.isfile(outhand_2d_path + ".mp4") and os.path.isdir(outhand_2d_path):
+                    shutil.rmtree(outhand_2d_path)
                 print('Video Handler Released')
             if args.vis_3d_repro:
                 outhand_3d.release()
                 convert_video_ffmpeg(outhand_3d_path+".mp4")
+                if os.path.isfile(outhand_3d_path + ".mp4") and os.path.isdir(outhand_3d_path):
+                    shutil.rmtree(outhand_3d_path)
                 print('Video Handler Released')
             outjoint_3d.release()
             convert_video_ffmpeg(outjoint_3d_path+".mp4")
+            if os.path.isfile(outjoint_3d_path + ".mp4") and os.path.isdir(outjoint_3d_path):
+                shutil.rmtree(outjoint_3d_path)
             print('Video Handler Released')

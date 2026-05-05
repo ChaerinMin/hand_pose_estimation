@@ -12,7 +12,8 @@
       "Read(//oscar/data/ssrinath/public/brics-studio/2025-04-05/multisequence000001/calib/stage2/sparse/0/**)",
       "Bash(python -c \"import ast; ast.parse\\(open\\('scripts_body/vis_selected_views.py'\\).read\\(\\)\\); print\\('ok'\\)\")",
       "Bash(python -c ' *)",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('scripts_body/bake_smplx_vertices.py'\\).read\\(\\)\\); print\\('ok'\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('scripts_body/bake_smplx_vertices.py'\\).read\\(\\)\\); print\\('ok'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('scripts_body/keypoints_2d_yolo_vitpose.py'\\).read\\(\\)\\); print\\('OK: syntax valid'\\)\")"
     ]
   }
 }

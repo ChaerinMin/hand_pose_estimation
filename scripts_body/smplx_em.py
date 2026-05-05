@@ -22,6 +22,7 @@ import argparse
 import glob
 import json
 import os
+import shutil
 import sys
 import cv2
 import math
@@ -991,14 +992,20 @@ for selected_vid_idx in selected_vid_idxs:
         if args.vis_2d_repro:
             out_2d.release()
             convert_video_ffmpeg(out_2d_path + ".mp4")
+            if os.path.isfile(out_2d_path + ".mp4") and os.path.isdir(out_2d_path):
+                shutil.rmtree(out_2d_path)
             print('2D repro video saved')
         if args.vis_3d_repro:
             out_3d.release()
             convert_video_ffmpeg(out_3d_path + ".mp4")
+            if os.path.isfile(out_3d_path + ".mp4") and os.path.isdir(out_3d_path):
+                shutil.rmtree(out_3d_path)
             print('3D repro video saved')
 
         out_joint.release()
         convert_video_ffmpeg(out_joint_path + ".mp4")
+        if os.path.isfile(out_joint_path + ".mp4") and os.path.isdir(out_joint_path):
+            shutil.rmtree(out_joint_path)
         print('Joint video saved')
 
 print("SMPL-X fitting complete!")
