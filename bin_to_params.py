@@ -13,23 +13,25 @@ import pycolmap
 
 
 def main(args):
-    # bin -> txt
-    calib_dir = os.path.join(
-        args.brics_dir,
-        args.day,
-        args.multisequence,
-        "calib",
-        f"stage{args.stage}",
-        "sparse",
-        "0"
+    # plaster writes the *best* stage-2 reconstruction at the calib/ top level.
+    # stage2/sparse/0 is just the first incremental_mapping output, which is
+    # not always the best one — reading from it can disagree with image_confidence.json.
+    base_calib_dir = os.path.join(
+        args.brics_dir, args.day, args.multisequence, "calib",
     )
-    reconstruction = pycolmap.Reconstruction(calib_dir)
-    reconstruction.write_text(calib_dir)
-    print(f"Converted .bin to .txt in {calib_dir}")
+    if args.stage == 2:
+        recon_dir = base_calib_dir
+    else:
+        recon_dir = os.path.join(base_calib_dir, f"stage{args.stage}", "sparse", "0")
+
+    # bin -> txt (written next to the bins so they stay consistent)
+    reconstruction = pycolmap.Reconstruction(recon_dir)
+    reconstruction.write_text(recon_dir)
+    print(f"Converted .bin to .txt in {recon_dir}")
 
     # colmap txt -> params.txt
     image_params = []
-    with open(os.path.join(calib_dir, "images.txt")) as f:
+    with open(os.path.join(recon_dir, "images.txt")) as f:
         skip_next = False
         for line in f.readlines():
             if skip_next:
@@ -52,7 +54,7 @@ def main(args):
         ('tvecx', float), ('tvecy', float), ('tvecz', float)
     ])
     cam_params = []
-    with open(os.path.join(calib_dir, "cameras.txt")) as f:
+    with open(os.path.join(recon_dir, "cameras.txt")) as f:
         for line in f.readlines():
             if line.startswith("#"):
                 continue
@@ -85,7 +87,11 @@ def main(args):
     df_images = pd.DataFrame(images)
     df_merged = pd.merge(df_cameras, df_images, on='cam_id')
     img_cams = df_merged.to_records(index=False)
-    out_path = os.path.join(calib_dir, 'params.txt')
+    # downstream scripts (keypoints_2d/3d, mano_em, mask_2d, ...) read
+    # params.txt from stage{N}/sparse/0/, so keep that path stable.
+    out_dir = os.path.join(base_calib_dir, f"stage{args.stage}", "sparse", "0")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, 'params.txt')
     np.savetxt(out_path, img_cams, fmt="%s", header=" ".join(img_cams.dtype.fields))
     print(f"Saved {out_path}")
     return
